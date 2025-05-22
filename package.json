@@ -1,0 +1,136 @@
+{
+    "name": "intelligent-debugger",
+    "displayName": "Intelligent AI Debugger",
+    "description": "AI-powered debugging assistant that identifies optimal debugging points and provides intelligent insights",
+    "version": "0.1.0",
+    "engines": {
+        "vscode": "^1.60.0"
+    },
+    "categories": [
+        "Debuggers",
+        "Other"
+    ],
+    "activationEvents": [
+        "onCommand:intelligent-debugger.startAnalysis",
+        "onDebug"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "intelligent-debugger.startAnalysis",
+                "title": "Start Intelligent Code Analysis"
+            },
+            {
+                "command": "intelligent-debugger.setCustomPrompt",
+                "title": "Set Custom Debug Prompt"
+            },
+            {
+                "command": "intelligent-debugger.viewInsights",
+                "title": "View Debug Insights"
+            },
+            {
+                "command": "intelligent-debugger.configureLLM",
+                "title": "Configure LLM Settings"
+            }
+        ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "intelligent-debugger",
+                    "title": "AI Debugger",
+                    "icon": "resources/debugger-icon.svg"
+                }
+            ]
+        },
+        "views": {
+            "intelligent-debugger": [
+                {
+                    "id": "debugBreakpoints",
+                    "name": "Intelligent Breakpoints"
+                },
+                {
+                    "id": "debugInsights",
+                    "name": "Debug Insights"
+                },
+                {
+                    "id": "rootCauses",
+                    "name": "Root Cause Analysis"
+                },
+                {
+                    "id": "llmSuggestions",
+                    "name": "Fix Suggestions"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "Intelligent Debugger",
+            "properties": {
+                "intelligentDebugger.maxBreakpoints": {
+                    "type": "number",
+                    "default": 10,
+                    "description": "Maximum number of intelligent breakpoints to set"
+                },
+                "intelligentDebugger.enableAIAnalysis": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable AI-powered analysis of debugging data"
+                },
+                "intelligentDebugger.llmProvider": {
+                    "type": "string",
+                    "enum": [
+                        "openai",
+                        "anthropic",
+                        "google",
+                        "local"
+                    ],
+                    "default": "openai",
+                    "description": "LLM provider to use for AI analysis"
+                },
+                "intelligentDebugger.llmApiKey": {
+                    "type": "string",
+                    "default": "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",
+                    "description": "API key for the selected LLM provider"
+                },
+                "intelligentDebugger.llmModel": {
+                    "type": "string",
+                    "default": "gpt-4",
+                    "description": "Model to use for AI analysis (options depend on provider)"
+                },
+                "intelligentDebugger.localLLMEndpoint": {
+                    "type": "string",
+                    "default": "http://localhost:8080/v1",
+                    "description": "Endpoint URL for local LLM server if using local option"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile",
+        "test": "node ./out/test/runTest.js"
+    },
+    "devDependencies": {
+        "@babel/parser": "^7.27.2",
+        "@types/escodegen": "^0.0.10",
+        "@types/esprima": "^4.0.6",
+        "@types/estraverse": "^5.1.7",
+        "@types/node": "^16.11.7",
+        "@types/vscode": "^1.100.0",
+        "@typescript-eslint/eslint-plugin": "^5.30.0",
+        "@typescript-eslint/parser": "^5.30.0",
+        "acorn": "^8.14.1",
+        "eslint": "^8.18.0",
+        "esprima-next": "^6.0.3",
+        "typescript": "^4.7.4"
+    },
+    "dependencies": {
+        "@anthropic-ai/sdk": "^0.10.2",
+        "axios": "^1.9.0",
+        "escodegen": "^2.1.0",
+        "estraverse": "^5.3.0",
+        "openai": "^4.100.0"
+    }
+}
