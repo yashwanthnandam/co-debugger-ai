@@ -143,6 +143,7 @@ export class DebugInsightsProvider implements vscode.TreeDataProvider<InsightDat
     readonly onDidChangeTreeData: vscode.Event<InsightDataItem | undefined | null | void> = this._onDidChangeTreeData.event;
     private items: InsightDataItem[] = [];
 
+    
     refresh(data?: any[]) {
         if (data && data.length > 0) {
             this.items = data.map(insight => new InsightDataItem(

@@ -1,9 +1,12 @@
+import * as dotenv from 'dotenv';
 import * as vscode from 'vscode';
 import axios from 'axios';
 import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
-import * as fs from 'fs';
-import * as path from 'path';
+import { API_KEYS } from './config';
+
+
+dotenv.config();
 
 export interface LLMAnalysisResult {
     suggestions: string[];
@@ -37,6 +40,7 @@ export interface FixSuggestion {
     confidence: number;
 }
 
+
 export class LLMService {
     private provider: string;
     private apiKey: string;
@@ -52,9 +56,24 @@ export class LLMService {
         const config = vscode.workspace.getConfiguration('intelligentDebugger');
         this.provider = config.get<string>('llmProvider') || 'openai';
         this.apiKey = config.get<string>('llmApiKey') || '';
-        this.model = config.get<string>('llmModel') || 'gpt-4';
-        this.localEndpoint = config.get<string>('localLLMEndpoint') || 'http://localhost:8080/v1';
         
+        if (!this.apiKey) {
+            console.log('No API key in settings, using hardcoded config');
+            
+            switch (this.provider) {
+                case 'openai':
+                    this.apiKey = API_KEYS.OPENAI;
+                    break;
+                case 'anthropic':
+                    this.apiKey = API_KEYS.ANTHROPIC;
+                    break;
+                case 'google':
+                    this.apiKey = API_KEYS.GOOGLE;
+                    break;
+            }
+        }
+                this.model = config.get<string>('llmModel') || 'gpt-4';
+        this.localEndpoint = config.get<string>('localLLMEndpoint') || 'http://localhost:8080/v1';
         // Initialize appropriate client
         this.initializeClient();
     }
@@ -90,7 +109,10 @@ export class LLMService {
         );
     }
     // Update the callLLM method in the LLMService class
-    private async callLLM(prompt: string, systemPrompt?: string): Promise<string> {
+    /**
+ * Public method to call LLM directly with system prompt and user prompt
+ */
+    public async callLLM(prompt: string, systemPrompt?: string): Promise<string> {
         if (!this.apiKey && this.provider !== 'local') {
             throw new Error('LLM API key not configured. Please configure it in the settings.');
         }
@@ -136,10 +158,22 @@ export class LLMService {
                         stop_sequences: ["\nHuman:", "\n\nHuman:"]
                     });
                     
+                    return anthropicResponse.completion || '';
                     
-                    return anthropicResponse.completion || '';                    
-                // Other cases remain the same
-                // ...
+                case 'local':
+                    // Local LLM implementation
+                    const response = await axios.post(`${this.localEndpoint}/chat/completions`, {
+                        model: this.model,
+                        messages: [
+                            ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+                            { role: 'user', content: prompt }
+                        ]
+                    });
+                    
+                    return response.data.choices[0]?.message?.content || '';
+                    
+                default:
+                    throw new Error(`Unsupported LLM provider: ${this.provider}`);
             }
         } catch (error) {
             console.error('Error calling LLM:', error);
@@ -483,6 +517,7 @@ Format your response as a JSON object with these fields:
             };
         }
     }
+    
     
     /**
      * Generate fix suggestions for identified issues

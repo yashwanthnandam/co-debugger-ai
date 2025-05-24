@@ -1,8 +1,9 @@
 {
-    "name": "intelligent-debugger",
-    "displayName": "Intelligent AI Debugger",
+    "name": "co-debugger.ai",
+    "displayName": "CoDebugger.ai",
     "description": "AI-powered debugging assistant that identifies optimal debugging points and provides intelligent insights",
     "version": "0.1.0",
+    "license": "MIT",
     "engines": {
         "vscode": "^1.60.0"
     },
@@ -32,8 +33,45 @@
             {
                 "command": "intelligent-debugger.configureLLM",
                 "title": "Configure LLM Settings"
+            },
+            {
+                "command": "intelligent-debugger.testDebug",
+                "title": "Test Debugging Functionality"
+            },
+            {
+                "command": "intelligent-debugger.startIntelligentDebug",
+                "title": "Start Intelligent Debugging",
+                "category": "Intelligent Debugger",
+                "icon": "$(debug)"
+            },
+            {
+                "command": "intelligent-debugger.askAboutSelectedVariable",
+                "title": "Ask About Selected Variable",
+                "category": "Intelligent Debugger"
+            },
+            {
+                "command": "intelligent-debugger.promptVariable",
+                "title": "Ask About Any Variable",
+                "category": "Intelligent Debugger",
+                "icon": "$(question)"
             }
         ],
+        "menus": {
+            "editor/context": [
+                {
+                    "command": "intelligent-debugger.askAboutSelectedVariable",
+                    "when": "editorHasSelection && debugState == 'stopped'",
+                    "group": "navigation"
+                }
+            ],
+            "debug/toolBar": [
+                {
+                    "command": "intelligent-debugger.promptVariable",
+                    "when": "debugState == 'stopped'",
+                    "group": "navigation"
+                }
+            ]
+        },
         "viewsContainers": {
             "activitybar": [
                 {
@@ -89,12 +127,12 @@
                 },
                 "intelligentDebugger.llmApiKey": {
                     "type": "string",
-                    "default": "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",
+                    "default": "",
                     "description": "API key for the selected LLM provider"
                 },
                 "intelligentDebugger.llmModel": {
                     "type": "string",
-                    "default": "gpt-4",
+                    "default": "gpt-3.5-turbo",
                     "description": "Model to use for AI analysis (options depend on provider)"
                 },
                 "intelligentDebugger.localLLMEndpoint": {
@@ -129,6 +167,7 @@
     "dependencies": {
         "@anthropic-ai/sdk": "^0.10.2",
         "axios": "^1.9.0",
+        "dotenv": "^16.5.0",
         "escodegen": "^2.1.0",
         "estraverse": "^5.3.0",
         "openai": "^4.100.0"

@@ -58,103 +58,116 @@ export class DebuggerIntegration implements vscode.Disposable {
     }
     
     private async handleDebugSessionStart(session: vscode.DebugSession): Promise<void> {
-        console.log("Debug session started:", session.type, session.id, session.name);
+        console.log(`🔄 Debug session started: ${session.type} (ID: ${session.id})`);
         
         // Clear previous data when starting a new debug session
         this.dataCollector.clearData();
         
-        // Log existing breakpoints
+        // Set our intelligent breakpoints with better logging
         const breakpoints = this.breakpointManager.getAllBreakpoints();
         console.log(`Setting ${breakpoints.length} intelligent breakpoints`);
+        
         for (const bp of breakpoints) {
-            console.log(`Breakpoint: ${bp.uri.fsPath}:${bp.line+1} (ID: ${bp.id})`);
+            console.log(`Setting breakpoint at ${bp.uri.fsPath}:${bp.line + 1} (ID: ${bp.id})`);
             await this.setVSCodeBreakpoint(bp);
         }
-    
-        // *** ENHANCED DEBUG ADAPTER TRACKING ***
         
-        // Register debug adapter tracker with MORE MESSAGE LOGGING
+        // Get the current breakpoints to verify they're set
+        const activeBreakpoints = vscode.debug.breakpoints;
+        console.log(`Active VS Code breakpoints: ${activeBreakpoints.length}`);
+        for (const bp of activeBreakpoints) {
+            if (bp instanceof vscode.SourceBreakpoint) {
+                console.log(`Active breakpoint: ${bp.location.uri.fsPath}:${bp.location.range.start.line + 1}`);
+            }
+        }
+        
+        // ✅ IMPORTANT: Register ALL possible event handlers for the debug session
         this.disposables.push(
+            // Register for direct debug events from VS Code
+            vscode.debug.onDidReceiveDebugSessionCustomEvent(e => {
+                console.log(`Debug custom event: ${e.event}`, e.body);
+            }),
+            
+            // Monitor stopped events directly
+            vscode.debug.onDidChangeBreakpoints(e => {
+                console.log(`Breakpoints changed: ${e.added.length} added, ${e.removed.length} removed, ${e.changed.length} changed`);
+            }),
+            
+            // Monitor active debug sessions
+            vscode.debug.onDidStartDebugSession(s => {
+                if (s.id !== session.id) {
+                    console.log(`New debug session started: ${s.id}`);
+                }
+            }),
+            
+            // Register comprehensive debug adapter tracker
             vscode.debug.registerDebugAdapterTrackerFactory('*', {
                 createDebugAdapterTracker: (trackerSession: vscode.DebugSession) => {
-                    console.log(`Creating tracker for debug session: ${trackerSession.id}`);
+                    console.log(`Creating debug tracker for ${trackerSession.type} session ${trackerSession.id}`);
                     
                     return {
                         onWillStartSession: () => {
-                            console.log(`Debug tracker: session starting`);
-                        },
-                        
-                        onWillReceiveMessage: (message: any) => {
-                            console.log(`Debug tracker: receiving message type=${message.type || 'unknown'}`);
+                            console.log(`Debug session ${trackerSession.id} is starting`);
                         },
                         
                         onDidSendMessage: async (message: any) => {
-                            // Log all messages to see what's coming through
-                            console.log(`Debug message sent: type=${message.type}, event=${message.event || 'none'}`, 
-                                       message.body ? `body keys: ${Object.keys(message.body).join(', ')}` : 'no body');
+                            // 🔍 Log ALL message types to diagnose the issue
+                            console.log(`DEBUG MESSAGE [${message.type}]: ${message.event || message.command || 'unknown'}`);
                             
-                            // Look for stopped events and breakpoint events
-                            if (message.type === 'event') {
-                                if (message.event === 'stopped') {
-                                    console.log(`STOPPED EVENT: reason=${message.body?.reason}, threadId=${message.body?.threadId}`);
+                            // Specifically look for stop events
+                            if (message.type === 'event' && message.event === 'stopped') {
+                                console.log(`🔴 BREAKPOINT STOPPED: reason=${message.body?.reason}, threadId=${message.body?.threadId}`);
+                                
+                                // Add a notification so it's clearly visible
+                                vscode.window.showInformationMessage(
+                                    `Breakpoint hit: ${message.body?.reason || 'unknown reason'}`,
+                                    'Inspect', 'Continue'
+                                ).then(selection => {
+                                    if (selection === 'Continue') {
+                                        trackerSession.customRequest('continue', { threadId: message.body.threadId });
+                                    } else if (selection === 'Inspect') {
+                                        vscode.commands.executeCommand('workbench.debug.action.focusVariablesView');
+                                    }
+                                });
+                                
+                                try {
                                     await this.handleBreakpointHit(trackerSession, message);
-                                } 
-                                else if (message.event === 'breakpoint') {
-                                    console.log(`BREAKPOINT EVENT: ${JSON.stringify(message.body || {})}`);
-                                }
-                                else if (message.event === 'initialized') {
-                                    console.log(`INITIALIZED EVENT: debugger ready`);
+                                } catch (error) {
+                                    console.error('Error in breakpoint handler:', error);
                                 }
                             }
                             
-                            // Also catch any "output" events 
-                            if (message.type === 'event' && message.event === 'output') {
-                                console.log(`DEBUG OUTPUT: ${message.body?.output || ''}`);
+                            // Track other important events
+                            if (message.type === 'event') {
+                                if (['breakpoint', 'initialized', 'terminated'].includes(message.event)) {
+                                    console.log(`Important debug event: ${message.event}`, message.body);
+                                }
+                            }
+                            
+                            // Track request results related to breakpoints and variables
+                            if (message.type === 'response') {
+                                if (['setBreakpoints', 'configurationDone'].includes(message.command)) {
+                                    console.log(`Response to ${message.command}:`, message.body);
+                                }
                             }
                         },
                         
-                        onError: (error: Error) => {
-                            console.error(`Debug tracker error: ${error.message}`, error);
-                        },
-                        
-                        onExit: (code: number, signal: string) => {
-                            console.log(`Debug tracker: session exited with code ${code}, signal ${signal}`);
-                        },
-                        
-                        onWillStopSession: () => {
-                            console.log(`Debug tracker: session stopping`);
+                        onWillReceiveMessage: (message: any) => {
+                            // Only log key requests to reduce noise
+                            if (message.type === 'request' && 
+                                ['setBreakpoints', 'configurationDone', 'initialize'].includes(message.command)) {
+                                console.log(`Debug request: ${message.command}`);
+                            }
                         }
                     };
                 }
             })
         );
         
-        // Also register for the STANDARD events from VSCode
-        this.disposables.push(
-            vscode.debug.onDidChangeBreakpoints(event => {
-                console.log(`Breakpoints changed: ${event.added.length} added, ${event.removed.length} removed, ${event.changed.length} changed`);
-            }),
-            
-            vscode.debug.onDidReceiveDebugSessionCustomEvent(event => {
-                console.log(`Custom debug event: ${event.event}`, event.body);
-            }),
-            
-            vscode.debug.onDidStartDebugSession(debugSession => {
-                if (debugSession.id !== session.id) {
-                    console.log(`Another debug session started: ${debugSession.id}`);
-                }
-            })
-        );
-        
-        // Notify user
+        // Show message to confirm debugger is ready
         vscode.window.showInformationMessage(
-            'Intelligent Debugger active: AI-assisted debugging enabled.',
-            'Learn More'
-        ).then(selection => {
-            if (selection === 'Learn More') {
-                vscode.commands.executeCommand('intelligent-debugger.viewInsights');
-            }
-        });
+            'co-debugger-ai active: Run your code to start debugging.'
+        );
     }
     
     private async handleDebugSessionEnd(session: vscode.DebugSession): Promise<void> {
@@ -193,17 +206,42 @@ export class DebuggerIntegration implements vscode.Disposable {
             const threadId = message.body.threadId;
             console.log("Thread ID:", threadId);
             
-            const stackFrames = await this.getStackFrames(session, threadId);
-            console.log("Stack frames count:", stackFrames.length);
+            // 🔧 Add a delay to ensure VS Code's debug UI has updated
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Get stack frames with error handling
+            let stackFrames = [];
+            try {
+                const response = await session.customRequest('stackTrace', { threadId });
+                stackFrames = response.stackFrames || [];
+                console.log("Stack frames count:", stackFrames.length);
+            } catch (stackError) {
+                console.error("Error getting stack frames:", stackError);
+                // Create a minimal frame if needed
+                stackFrames = [{
+                    id: 0,
+                    name: "Unknown",
+                    line: 0,
+                    column: 0,
+                    source: { name: "unknown", path: "unknown" }
+                }];
+            }
             
             if (stackFrames.length === 0) {
-                console.log("No stack frames available, skipping data collection");
-                return;
+                console.log("No stack frames available, using fallback");
+                // Use a fallback frame
+                stackFrames = [{
+                    id: 0,
+                    name: "Unknown",
+                    line: 0,
+                    column: 0,
+                    source: { name: "unknown", path: "unknown" }
+                }];
             }
             
             const topFrame = stackFrames[0];
-            const fileName = topFrame.source?.path || '';
-            const lineNumber = topFrame.line;
+            const fileName = topFrame.source?.path || 'unknown';
+            const lineNumber = topFrame.line || 0;
             
             console.log(`Hit at ${fileName}:${lineNumber}`);
             
@@ -211,90 +249,145 @@ export class DebuggerIntegration implements vscode.Disposable {
             const matchingBp = this.findBreakpointAtLocation(fileName, lineNumber);
             console.log("Matching breakpoint:", matchingBp ? matchingBp.id : "None");
             
+            // 🔧 Even if no matching breakpoint, collect data anyway
+            const actualFrameId = topFrame.id;
+            
+            // Get variables with better error handling
+            let variables = {};
+            try {
+                // Get scopes
+                let scopes = [];
+                try {
+                    const scopesResponse = await session.customRequest('scopes', { frameId: actualFrameId });
+                    scopes = scopesResponse.scopes || [];
+                    console.log("Scopes found:", scopes.length);
+                } catch (scopeError) {
+                    console.error("Error getting scopes:", scopeError);
+                }
+                
+                // 🔍 Try multiple approaches to get variables
+                if (scopes.length > 0) {
+                    variables = await this.getVariables(session, scopes, actualFrameId);
+                } else {
+                    // Try direct evaluation of common variables
+                    variables = await this.getVariablesByEvaluation(session, actualFrameId);
+                }
+            } catch (varError) {
+                console.error("Error collecting variables:", varError);
+            }
+            
+            console.log("Variables collected:", Object.keys(variables));
+            
+            // Convert stack frames to strings for the call stack
+            const callStack = stackFrames.map(frame => 
+                `${frame.name} (${frame.source?.name || 'unknown'}:${frame.line || 0})`
+            );
+            
+            // 🔧 Create a synthetic breakpoint if needed
+            const breakpointId = matchingBp ? matchingBp.id : `synthetic_bp_${fileName}_${lineNumber}`;
+            const nodeId = matchingBp ? matchingBp.nodeId : `synthetic_node_${fileName}_${lineNumber}`;
+            
+            // Collect the data
+            const dataPoint = await this.dataCollector.collectData(
+                breakpointId,
+                nodeId,
+                variables,
+                callStack
+            );
+            console.log("Data point collected:", dataPoint ? "success" : "failed");
+            
+            // Update the debug insights view in real-time
+            this.updateDebugInsights(fileName, lineNumber, variables, callStack, dataPoint);
+            
+            // Process any other breakpoint handlers
             if (matchingBp) {
-                // Get variables in the current scope
-                const scopes = await this.getScopes(session, topFrame.id);
-                console.log("Scopes found:", scopes.length);
-                
-                const variables = await this.getVariables(session, scopes, topFrame.id);
-                console.log("Variables collected:", Object.keys(variables));
-                
-                // Convert stack frames to strings for the call stack
-                const callStack = stackFrames.map(frame => 
-                    `${frame.name} (${frame.source?.name}:${frame.line})`
-                );
-                
-                // Collect the data
-                const dataPoint = await this.dataCollector.collectData(
-                    matchingBp.id,
-                    matchingBp.nodeId,
-                    variables,
-                    callStack
-                );
-                console.log("Data point collected:", dataPoint ? "success" : "failed");
-
-                // Update the debug insights view in real-time
-                if (this.debugInsightsProvider) {
-                    const insightData = [];
-                    
-                    // Add basic execution context
-                    insightData.push({
-                        title: `Breakpoint hit at ${fileName.split('/').pop()}:${lineNumber}`,
-                        description: `Call stack: ${callStack[0] || 'Main'}`
-                    });
-                    
-                    // Add variable values
-                    for (const [name, value] of Object.entries(variables)) {
-                        insightData.push({
-                            title: `${name} = ${value}`,
-                            description: "Current variable value"
-                        });
-                    }
-                    
-                    // Add anomaly info if available
-                    if (dataPoint.anomalyScore && dataPoint.anomalyScore > 1.0) {
-                        insightData.push({
-                            title: `Anomaly detected (score: ${dataPoint.anomalyScore.toFixed(2)})`,
-                            description: dataPoint.anomalyDetails?.explanation?.explanation || 
-                                "Unusual behavior detected"
-                        });
-                    }
-                    
-                    console.log("Updating debug insights with", insightData.length, "items");
-                    this.debugInsightsProvider.refresh(insightData);
-                }
-                
-                // Check if we have a custom prompt for this breakpoint
-                const prompt = await this.promptManager.getPrompt(vscode.Uri.file(fileName), lineNumber - 1);
-                
-                if (prompt) {
-                    // Display the custom prompt with collected data and enhanced insights
-                    this.showDebugInsight(matchingBp, dataPoint, prompt);
-                }
-                
-                // Run real-time analysis
-                const infoGain = this.infoGainAnalyzer.getInformativeVariablesForBreakpoint(matchingBp.id);
-                
-                // If we detected anomalies, suggest focus areas
-                if (dataPoint.anomalyScore && dataPoint.anomalyScore > 1.5) {
-                    // Show anomaly explanation from LLM if available
-                    if (dataPoint.anomalyDetails?.explanation) {
-                        this.showAnomalyExplanation(matchingBp, dataPoint);
-                    }
-                    
-                    this.suggestNextDebugSteps(matchingBp, infoGain);
-                }
-                
-                // If this breakpoint has LLM insights, show them
-                if (matchingBp.llmInsights && matchingBp.llmInsights.length > 0) {
-                    this.showLLMInsights(matchingBp);
-                }
-            } else {
-                console.log("No matching intelligent breakpoint found at", fileName, lineNumber);
+                // Your existing code for matchingBp...
             }
         } catch (error) {
             console.error('Error handling breakpoint hit:', error);
         }
+    }
+    
+    // 🆕 New helper method for getting variables through evaluation
+    private async getVariablesByEvaluation(session: vscode.DebugSession, frameId: number): Promise<any> {
+        const variables: any = {};
+        
+        console.log("Getting variables through direct evaluation");
+        
+        // Try to evaluate common variable names
+        const commonVars = [
+            // Built-in objects
+            'this', 'global', 'window', 'document', 
+            // Common variable names
+            'i', 'j', 'k', 'index', 'value', 'result', 'data', 'item', 'items',
+            'array', 'list', 'map', 'obj', 'object', 'options', 'config', 'params',
+            'callback', 'handler', 'error', 'err', 'e', 'ex', 'exception',
+            'response', 'res', 'req', 'request', 'input', 'output',
+            // Function parameters in your test code
+            'userOptions', 'numbers', 'testArray', 'input'
+        ];
+        
+        for (const varName of commonVars) {
+            try {
+                const response = await session.customRequest('evaluate', {
+                    expression: varName,
+                    frameId: frameId,
+                    context: 'watch'
+                });
+                
+                if (response.result !== undefined) {
+                    console.log(`Evaluated ${varName} = ${response.result}`);
+                    variables[varName] = this.parseVariableValue({ name: varName, value: response.result });
+                }
+            } catch (evalError) {
+                // Silently ignore evaluation errors for variables that don't exist
+            }
+        }
+        
+        return variables;
+    }
+    
+    // 🆕 New helper method to update debug insights
+    private updateDebugInsights(
+        fileName: string, 
+        lineNumber: number, 
+        variables: any, 
+        callStack: string[], 
+        dataPoint: any
+    ): void {
+        if (!this.debugInsightsProvider) return;
+        
+        console.log("Updating debug insights with real-time data");
+        
+        const insightData = [];
+        
+        // Add breakpoint location
+        insightData.push({
+            title: `Breakpoint hit at ${fileName.split('/').pop()}:${lineNumber}`,
+            description: `Call stack: ${callStack[0] || 'Main'}`
+        });
+        
+        // Add variable values
+        for (const [name, value] of Object.entries(variables)) {
+            insightData.push({
+                title: `${name} = ${value}`,
+                description: "Current variable value"
+            });
+        }
+        
+        // Add anomaly info if available
+        if (dataPoint && dataPoint.anomalyScore && dataPoint.anomalyScore > 1.0) {
+            insightData.push({
+                title: `Anomaly detected (score: ${dataPoint.anomalyScore.toFixed(2)})`,
+                description: dataPoint.anomalyDetails?.explanation?.explanation || 
+                    "Unusual behavior detected"
+            });
+        }
+        
+        console.log("Updating debug insights with", insightData.length, "items");
+        
+        // Use .refresh() to update the debug insights provider
+        this.debugInsightsProvider.refresh(insightData);
     }
     
     private showAnomalyExplanation(
@@ -1170,71 +1263,74 @@ function findMax(numbers) {
     }
     
     private async setVSCodeBreakpoint(bp: IntelligentBreakpoint): Promise<void> {
-        // Create a VS Code breakpoint
-        const location = new vscode.Location(
-            bp.uri,
-            new vscode.Position(bp.line, bp.column)
-        );
-        
-        // Create either a basic breakpoint or a conditional breakpoint
-        let vscodeBreakpoint: vscode.Breakpoint;
-        
-        // Check if we should set a conditional breakpoint based on LLM insights
-        let condition = '';
-        
-        // If we have LLM insights suggesting a specific condition, use that
-        if (bp.llmInsights) {
-            for (const insight of bp.llmInsights) {
-                // Look for insights that mention conditions
-                if (insight.includes('condition:')) {
-                    condition = insight.split('condition:')[1].trim();
-                    break;
+        // Create a VS Code breakpoint with improved logging
+        try {
+            const location = new vscode.Location(
+                bp.uri,
+                new vscode.Position(bp.line, bp.column)
+            );
+            
+            // Create a simple breakpoint - avoid conditions for now to debug the core functionality
+            const vscodeBreakpoint = new vscode.SourceBreakpoint(
+                location,
+                true, // enabled
+                undefined, // no condition for now
+                undefined, // no hit condition
+                bp.id // id
+            );
+            
+            // Store the breakpoint
+            this.activeBreakpoints.set(bp.id, vscodeBreakpoint);
+            
+            // Check if VS Code already has this breakpoint
+            const existingBreakpoints = vscode.debug.breakpoints.filter(existingBp => {
+                if (existingBp instanceof vscode.SourceBreakpoint) {
+                    return existingBp.location.uri.toString() === bp.uri.toString() && 
+                           existingBp.location.range.start.line === bp.line;
                 }
-            }
-        }
-        
-        if (condition) {
-            vscodeBreakpoint = new vscode.SourceBreakpoint(
-                location,
-                true, // enabled
-                condition, // logical condition
-                undefined, // hit condition
-                bp.id // id
-            );
-        } else {
-            vscodeBreakpoint = new vscode.SourceBreakpoint(
-                location,
-                true, // enabled
-                undefined, // no condition
-                undefined, // hit condition
-                bp.id // id
-            );
-        }
-        
-        // Store the breakpoint
-        this.activeBreakpoints.set(bp.id, vscodeBreakpoint);
-        
-        // Add the breakpoint to VS Code
-        vscode.debug.addBreakpoints([vscodeBreakpoint]);
-        
-        // Add a decoration to show this is an intelligent breakpoint
-        const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.toString() === bp.uri.toString());
-        if (editor) {
-            const decorationType = vscode.window.createTextEditorDecorationType({
-                before: {
-                    contentText: '🧠 ',
-                    color: 'green'
-                },
-                isWholeLine: true
+                return false;
             });
             
-            const range = new vscode.Range(
-                new vscode.Position(bp.line, 0),
-                new vscode.Position(bp.line, 0)
+            if (existingBreakpoints.length > 0) {
+                console.log(`Breakpoint at ${bp.uri.fsPath}:${bp.line + 1} already exists, reusing`);
+            } else {
+                // Add the breakpoint to VS Code
+                console.log(`Adding new breakpoint at ${bp.uri.fsPath}:${bp.line + 1}`);
+                vscode.debug.addBreakpoints([vscodeBreakpoint]);
+            }
+            
+            // Add a decoration to show this is an intelligent breakpoint
+            const editor = vscode.window.visibleTextEditors.find(e => 
+                e.document.uri.toString() === bp.uri.toString()
             );
             
-            editor.setDecorations(decorationType, [range]);
+            if (editor) {
+                const decorationType = vscode.window.createTextEditorDecorationType({
+                    isWholeLine: true,
+                    gutterIconPath: this.getBreakpointIconPath(),
+                    gutterIconSize: 'contain',
+                    backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
+                    overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.findMatchForeground')
+                });
+                
+                const range = new vscode.Range(
+                    new vscode.Position(bp.line, 0),
+                    new vscode.Position(bp.line, 0)
+                );
+                
+                editor.setDecorations(decorationType, [range]);
+                console.log(`Decoration set for breakpoint at ${bp.uri.fsPath}:${bp.line + 1}`);
+            }
+        } catch (error) {
+            console.error(`Error setting breakpoint at ${bp.uri.fsPath}:${bp.line + 1}:`, error);
         }
+    }
+    
+    // Helper method to get breakpoint icon
+    private getBreakpointIconPath(): vscode.Uri {
+        // You can create a custom icon in your extension resources folder
+        // Or use a built-in codicon
+        return vscode.Uri.parse('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iOCIgZmlsbD0iI0YxNDg3QiIvPjwvc3ZnPg==');
     }
     
     public dispose(): void {

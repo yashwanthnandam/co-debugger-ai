@@ -1,5 +1,10 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { CodeAnalyzer } from './codeAnalyzer';
+import { IntelligentDebugCommand } from './commands/intelligentDebugCommand';
+
 import { BreakpointManager } from './breakpointManager';
 import { DataCollector } from './dataCollector';
 import { DebuggerIntegration } from './debuggerIntegration';
@@ -9,7 +14,8 @@ import { LLMService } from './llmService';
 import { CausalAnalysis } from './causalAnalysis';
 import { InformationGainAnalyzer } from './informationGain';
 import { BreakpointsProvider, RootCauseProvider, FixSuggestionsProvider, DebugInsightsProvider } from './treeDataProviders';
-
+import { PromptVariableCommand } from './commands/promptVariableCommand';
+import { BreakpointRanker } from './algorithms/breakPointRanker';
 // Create a single instance of the LLM service to be shared
 let llmService: LLMService;
 
@@ -18,9 +24,10 @@ let breakpointsProvider: BreakpointsProvider;
 let rootCauseProvider: RootCauseProvider;
 let fixSuggestionsProvider: FixSuggestionsProvider;
 let debugInsightsProvider: DebugInsightsProvider;
+const breakpointRanker = new BreakpointRanker();
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Intelligent Debugger extension is now active');
+    console.log('co-debugger-ai extension is now active');
 
     // Initialize LLM service
     llmService = new LLMService();
@@ -31,7 +38,22 @@ export function activate(context: vscode.ExtensionContext) {
     const dataCollector = new DataCollector(llmService);
     const causalAnalyzer = new CausalAnalysis(dataCollector, llmService, codeAnalyzer);
     const infoGainAnalyzer = new InformationGainAnalyzer(dataCollector);
-    
+    const intelligentDebugCommand = new IntelligentDebugCommand(
+        context,
+        codeAnalyzer,
+        breakpointManager,
+        dataCollector,
+        debugInsightsProvider,
+        breakpointRanker
+    );
+
+    const promptVariableCommand = new PromptVariableCommand(
+        context,
+        llmService,
+        dataCollector,
+        codeAnalyzer,
+        intelligentDebugCommand,
+    );
     // Initialize and register tree data providers
     breakpointsProvider = new BreakpointsProvider();
     rootCauseProvider = new RootCauseProvider();
@@ -94,6 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
         await llmService.configureLLM();
     });
 
+    
     // Register start analysis command
     let startAnalysisCmd = vscode.commands.registerCommand('intelligent-debugger.startAnalysis', async () => {
         const editor = vscode.window.activeTextEditor;
@@ -162,6 +185,70 @@ export function activate(context: vscode.ExtensionContext) {
 
     
 
+    let testDebugCmd = vscode.commands.registerCommand('intelligent-debugger.testDebug', async () => {
+        // Create a simple test file
+        const testCode = `
+    // Test file for debugging
+    function main() {
+        console.log("Debug test starting");
+        
+        // Test data to observe
+        const testArray = [5, 9, 3, 1, 7];
+        let max = testArray[0];
+        
+        // Loop with a breakpoint (line 10)
+        for (let i = 0; i < testArray.length; i++) {
+            if (testArray[i] > max) {
+                max = testArray[i];
+            }
+        }
+        
+        console.log("Max value:", max);
+    }
+    
+    main();
+    `;
+    
+        // Save to a temp file
+        const tmpDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.tmpdir();
+        const testFilePath = path.join(tmpDir, 'debug-test.js');
+        fs.writeFileSync(testFilePath, testCode);
+        
+        // Open the file
+        const doc = await vscode.workspace.openTextDocument(testFilePath);
+        const editor = await vscode.window.showTextDocument(doc);
+        
+        // Set a breakpoint on the for loop (line 10)
+        const breakpointPosition = new vscode.Position(9, 0);
+        const breakpoint = new vscode.SourceBreakpoint(
+            new vscode.Location(doc.uri, breakpointPosition),
+            true
+        );
+        
+        // Clear existing breakpoints and add the new one
+        vscode.debug.removeBreakpoints(vscode.debug.breakpoints);
+        vscode.debug.addBreakpoints([breakpoint]);
+        
+        // Create a launch config
+        const config = {
+            type: 'node',
+            request: 'launch',
+            name: 'Debug Test',
+            program: testFilePath,
+            skipFiles: ['<node_internals>/**'],
+            stopOnEntry: false
+        };
+        
+        vscode.window.showInformationMessage('Starting test debugging session...');
+        
+        // First, analyze the code to set up intelligent debugging
+        await vscode.commands.executeCommand('intelligent-debugger.startAnalysis');
+        
+        // Then start debugging
+        await vscode.debug.startDebugging(vscode.workspace.workspaceFolders?.[0], config);
+    });
+    
+    context.subscriptions.push(testDebugCmd);
     // Register custom prompt command
     let setCustomPromptCmd = vscode.commands.registerCommand('intelligent-debugger.setCustomPrompt', async () => {
         const editor = vscode.window.activeTextEditor;

@@ -203,4 +203,60 @@ export class BreakpointManager {
     public getAllBreakpoints(): IntelligentBreakpoint[] {
         return [...this.rankedBreakpoints];
     }
+
+    // Add these methods to your BreakpointManager class
+
+    public async addBreakpoint(
+        uri: vscode.Uri,
+        line: number,
+        column: number,
+        nodeId: string,
+        reason: string
+    ): Promise<IntelligentBreakpoint> {
+        // Create a new intelligent breakpoint
+        const bp: IntelligentBreakpoint = {
+            id: `bp_${nodeId}`,
+            uri,
+            line,
+            column,
+            score: 1.0, // Default score
+            reason,
+            nodeId,
+            variables: []
+        };
+        
+        // Find the node to get more metadata
+        const node = this.analyzer.getNodes().get(nodeId);
+        if (node) {
+            bp.score = this.calculateBreakpointScore(node);
+            bp.variables = this.getKeyVariablesToWatch(node);
+        }
+        
+        // Add to ranked breakpoints if not already there
+        const existing = this.rankedBreakpoints.findIndex(b => b.id === bp.id);
+        if (existing >= 0) {
+            this.rankedBreakpoints[existing] = bp;
+        } else {
+            this.rankedBreakpoints.push(bp);
+        }
+        
+        // Create a VS Code breakpoint
+        const location = new vscode.Location(uri, new vscode.Position(line, column));
+        const vscodeBreakpoint = new vscode.SourceBreakpoint(location);
+        vscode.debug.addBreakpoints([vscodeBreakpoint]);
+        
+        return bp;
+    }
+
+    public getBreakpointAt(uri: vscode.Uri, line: number): IntelligentBreakpoint | undefined {
+        return this.rankedBreakpoints.find(bp => 
+            bp.uri.fsPath === uri.fsPath && bp.line === line
+        );
+    }
+
+    public clearBreakpoints(): void {
+        this.rankedBreakpoints = [];
+        // Also clear VS Code breakpoints
+        vscode.debug.removeBreakpoints(vscode.debug.breakpoints);
+    }
 }
