@@ -38,6 +38,7 @@ export function activate(context: vscode.ExtensionContext) {
     const dataCollector = new DataCollector(llmService);
     const causalAnalyzer = new CausalAnalysis(dataCollector, llmService, codeAnalyzer);
     const infoGainAnalyzer = new InformationGainAnalyzer(dataCollector);
+    debugInsightsProvider = new DebugInsightsProvider();
     const intelligentDebugCommand = new IntelligentDebugCommand(
         context,
         codeAnalyzer,
@@ -58,7 +59,6 @@ export function activate(context: vscode.ExtensionContext) {
     breakpointsProvider = new BreakpointsProvider();
     rootCauseProvider = new RootCauseProvider();
     fixSuggestionsProvider = new FixSuggestionsProvider();
-    debugInsightsProvider = new DebugInsightsProvider();
 
     // Initialize with default data
     breakpointsProvider.refresh([{

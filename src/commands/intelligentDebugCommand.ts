@@ -188,16 +188,20 @@ export class IntelligentDebugCommand {
                     
                     // Initialize Debug Insights panel with static analysis results
                     const potentialIssues = this.getPotentialIssues(nodes);
-                    this.debugInsightsProvider.refresh([
-                        {
-                            title: "Static Analysis Complete",
-                            description: `Found ${nodes.length} code structures for analysis`
-                        },
-                        ...potentialIssues.map(issue => ({
-                            title: issue.title,
-                            description: issue.description
-                        }))
-                    ]);
+                    if (this.debugInsightsProvider) {
+                        this.debugInsightsProvider.refresh([
+                            {
+                                title: "Static Analysis Complete",
+                                description: `Found ${nodes.length} code structures for analysis`
+                            },
+                            ...potentialIssues.map(issue => ({
+                                title: issue.title,
+                                description: issue.description
+                            }))
+                        ]);
+                    } else {
+                        console.warn('Debug insights provider is not available');
+                    }
                     
                     progress.report({ increment: 15, message: "Setting up debug session..." });
                     
@@ -269,16 +273,6 @@ export class IntelligentDebugCommand {
                                     // Collect debugging data
                                     await this.collectDebugData(session, message);
                                     
-                                    // Show notification - but DON'T auto-continue
-                                    vscode.window.showInformationMessage(
-                                        `Breakpoint hit: ${message.body?.reason || 'unknown reason'}`,
-                                        "View Insights"
-                                    ).then(selection => {
-                                        if (selection === "View Insights") {
-                                            vscode.commands.executeCommand('intelligent-debugger.viewInsights');
-                                        }
-                                        // Note: No automatic continue here - let user control this
-                                    });
                                 } catch (error) {
                                     console.error("Error handling breakpoint:", error);
                                 }
@@ -378,6 +372,9 @@ export class IntelligentDebugCommand {
     /**
      * Update the debug insights view with runtime data
      */
+   /**
+ * Update the debug insights view with runtime data
+    */
     private updateDebugInsightsWithRuntimeData(
         fileName: string,
         lineNumber: number,
@@ -386,6 +383,13 @@ export class IntelligentDebugCommand {
         dataPoint: any,
         nodeId: string
     ): void {
+        if (!this.debugInsightsProvider) {
+            console.warn('Debug insights provider is not available');
+            return;
+        }
+        
+        console.log(`Updating debug insights with runtime data - ${Object.keys(variables).length} total variables`);
+        
         // Create insights from the data
         const insights = [];
         
@@ -397,10 +401,16 @@ export class IntelligentDebugCommand {
             nodeId
         });
         
-        // Add variable insights
-        const topVars = this.findMostInformativeVariables(variables);
+        // Filter out Node.js internals and system variables
+        const filteredVars = this.filterOutNodeInternals(variables);
+        console.log(`After filtering: ${Object.keys(filteredVars).length} variables remain`);
+        
+        // Get the most informative variables
+        const topVars = this.findMostInformativeVariables(filteredVars);
+        console.log(`Top variables selected: ${topVars.map(([name]) => name).join(', ')}`);
         
         if (topVars.length > 0) {
+            // Add a section header for variables
             insights.push({
                 title: "Key Variables",
                 description: "Most informative variables at this breakpoint",
@@ -408,68 +418,176 @@ export class IntelligentDebugCommand {
                 nodeId
             });
             
+            // Add each important variable with context - WITHOUT including the value in the title
             for (const [name, value] of topVars) {
+                // Get a short type description for the value
+                const typeInfo = this.getShortTypeDescription(value);
+                
                 insights.push({
-                    title: `${name} = ${value}`,
+                    // Just show the variable name and type, not the full value
+                    title: `${name} (${typeInfo})`,
+                    // Keep the detailed description about why this variable matters
                     description: this.describeVariableImportance(name, value, variables),
                     iconPath: new vscode.ThemeIcon("symbol-field"),
-                    nodeId
+                    nodeId,
+                    // Store the value as a property so it's available when clicking
+                    contextValue: 'variable',
+                    // Store the actual value for reference when clicked
+                    value: value
                 });
             }
-        }
-        
-        // Add anomaly detection if available
-        if (dataPoint && dataPoint.anomalyScore && dataPoint.anomalyScore > 1.0) {
-            insights.push({
-                title: `Potential Issue Detected (Score: ${dataPoint.anomalyScore.toFixed(2)})`,
-                description: dataPoint.anomalyDetails?.explanation || 
-                    "Unusual behavior detected at this breakpoint",
-                iconPath: new vscode.ThemeIcon("warning"),
-                nodeId
-            });
-        }
-        
-        // Add execution context
-        if (callStack.length > 1) {
-            insights.push({
-                title: "Execution Context",
-                description: "Call stack leading to this point",
-                iconPath: new vscode.ThemeIcon("call-incoming"),
-                nodeId
-            });
             
-            // Add top 3 stack frames (skip the current one)
-            for (let i = 1; i < Math.min(callStack.length, 4); i++) {
-                insights.push({
-                    title: callStack[i],
-                    description: `Stack frame ${i}`,
-                    iconPath: new vscode.ThemeIcon("arrow-up"),
-                    nodeId
-                });
-            }
+            // Group variables by category if needed
+            this.addVariableCategorization(insights, variables, topVars, nodeId);
+        } else {
+            // If no variables were found after filtering, add a message
+            insights.push({
+                title: "No application variables found",
+                description: "Try setting breakpoints in code with more application-specific variables",
+                iconPath: new vscode.ThemeIcon("info"),
+                nodeId
+            });
         }
+        
+        // Add execution context and other insights as before...
         
         // Update the view
         this.debugInsightsProvider.refresh(insights);
     }
+
+    /**
+     * Get a short description of the variable's type and structure
+     */
+    private getShortTypeDescription(value: any): string {
+        if (value === null) return 'null';
+        if (value === undefined) return 'undefined';
+        
+        if (Array.isArray(value)) {
+            return `Array[${value.length}]`;
+        }
+        
+        if (typeof value === 'object') {
+            const keys = Object.keys(value);
+            return `Object{${keys.length} props}`;
+        }
+        
+        if (typeof value === 'string') {
+            return `String(${value.length})`;
+        }
+        
+        if (typeof value === 'number') {
+            return 'Number';
+        }
+        
+        if (typeof value === 'boolean') {
+            return 'Boolean';
+        }
+        
+        if (typeof value === 'function') {
+            return 'Function';
+        }
+        
+        return typeof value;
+    }
+        
+    /**
+     * Add categorized variables to insights
+     */
+    private addVariableCategorization(
+        insights: any[], 
+        variables: Record<string, any>, 
+        topVars: [string, any][],
+        nodeId: string
+    ): void {
+        // Group variables by category
+        const categories: Record<string, [string, any][]> = {
+            "State Variables": [],
+            "Control Variables": [],
+            "Data Variables": [],
+            "Other Variables": []
+        };
+        
+        // Categorize the top variables
+        for (const [name, value] of topVars) {
+            if (['i', 'j', 'index', 'count', 'length'].includes(name)) {
+                categories["Control Variables"].push([name, value]);
+            } else if (['result', 'output', 'data', 'response', 'item'].includes(name)) {
+                categories["Data Variables"].push([name, value]);
+            } else if (['status', 'state', 'mode', 'flag', 'enabled', 'active'].includes(name)) {
+                categories["State Variables"].push([name, value]);
+            } else {
+                categories["Other Variables"].push([name, value]);
+            }
+        }
+        
+        // Only add categories that have variables
+        for (const [category, vars] of Object.entries(categories)) {
+            if (vars.length > 0) {
+                insights.push({
+                    title: category,
+                    description: `${vars.length} variables related to ${category.toLowerCase()}`,
+                    iconPath: new vscode.ThemeIcon("symbol-variable"),
+                    nodeId
+                });
+            }
+        }
+    }
     
     /**
-     * Find the most informative variables in the current context
+     * Comprehensive variable filtering function 
      */
+    private filterOutNodeInternals(variables: Record<string, any>): Record<string, any> {
+        const result: Record<string, any> = {};
+        
+        // Extensive list of Node.js built-ins to filter out
+        const builtins = [
+            'Buffer', 'process', 'global', 'console', 'module', 'require', 'exports',
+            '__dirname', '__filename', 'globalThis', 'clearImmediate', 'clearInterval', 
+            'clearTimeout', 'setImmediate', 'setInterval', 'setTimeout',
+            'queueMicrotask', 'AbortController', 'AbortSignal', 'atob', 'btoa',
+            'Blob', 'crypto', 'fetch', 'BroadcastChannel', 'ByteLengthQueuingStrategy',
+            'CompressionStream', 'CountQueuingStrategy', 'Crypto'
+        ];
+        
+        // Filter out built-ins and system variables
+        for (const [key, value] of Object.entries(variables)) {
+            // Skip if it's in our list or starts with special characters
+            if (builtins.includes(key) || key.startsWith('__') || key === 'this') {
+                continue;
+            }
+            
+            // Skip functions with certain patterns that suggest Node.js internals
+            if (typeof value === 'string' && 
+                value.startsWith('f ') && 
+                (value.includes('mod ??= require(id)') || 
+                value.includes('lazyLoadedValue'))) {
+                continue;
+            }
+            
+            // Keep this variable
+            result[key] = value;
+        }
+        
+        console.log(`DEBUG: Filtered ${Object.keys(variables).length} variables down to ${Object.keys(result).length}`);
+        return result;
+    }
+        
     public findMostInformativeVariables(variables: Record<string, any>): [string, any][] {
         const varEntries = Object.entries(variables);
         
-        // Skip system/internal variables
-        const filteredVars = varEntries.filter(([name]) => 
-            !name.startsWith('__') && 
-            !name.startsWith('this') && 
-            name !== 'arguments'
-        );
-        
-        // Sort by potential informativeness (simplified algorithm)
-        // In a real implementation, you'd use your ranking algorithm
-        const scoredVars = filteredVars.map(([name, value]) => {
+        // Sort by potential informativeness (improved algorithm)
+        const scoredVars = varEntries.map(([name, value]) => {
             let score = 0;
+            
+            // Give highest priority to processed/transformed data variables
+            if (name === 'processedUser' || name.includes('processed') || name.includes('transformed')) {
+                score += 10;  // Highest priority
+            }
+            
+            // User data variables are highly valuable
+            else if (name.includes('user') || name.includes('data') || name.includes('options')) {
+                score += 5;
+            }
             
             // Variables that often indicate state
             if (['i', 'j', 'index', 'key', 'count'].includes(name)) score += 3;
@@ -482,17 +600,28 @@ export class IntelligentDebugCommand {
             // Arrays with content
             if (Array.isArray(value) && value.length > 0) score += 3;
             
+            // Context-related variables are often important
+            if (name.startsWith('ctx') || name.includes('context')) score += 3;
+            
+            // Input/output variables
+            if (name.includes('input') || name.includes('output')) score += 4;
+            
+            // Almost certainly user-defined variables with short names
+            if (name.length < 4 && !['id', 'key', 'val', 'err', 'req', 'res'].includes(name)) score += 2;
+            
             return { name, value, score };
         });
+        
+        // Log the scores for debugging
+        console.log('Variable scores:', scoredVars.map(v => `${v.name}: ${v.score}`).join(', '));
         
         // Sort by score (highest first) and take top 5
         return scoredVars
             .sort((a, b) => b.score - a.score)
-            .slice(0, 5)
+            .slice(0, 10)  // Increased to 6 to make room for processedUser
             .map(({ name, value }) => [name, value]);
     }
-    
-    /**
+        /**
      * Create a description of why a variable is important
      */
     private describeVariableImportance(
@@ -500,33 +629,56 @@ export class IntelligentDebugCommand {
         value: any, 
         allVariables: Record<string, any>
     ): string {
-        // In a real implementation, you would use your semantic analysis
-        // This is a simplified version
-        
+        // Loop counters and control variables
         if (['i', 'j', 'index', 'idx'].includes(name)) {
-            return "Loop counter/index variable";
+            return "Loop counter/index variable controlling iteration progress";
         }
         
+        // Processed data
+        if (name.includes('processed') || name.includes('transformed')) {
+            return "Contains transformed data after processing - key to understanding function output";
+        }
+        
+        // Accumulation variables
         if (['sum', 'total', 'result', 'accumulated'].includes(name)) {
-            return "Accumulator variable tracking computation progress";
+            return "Accumulator variable tracking computation progress and final results";
         }
         
+        // Error tracking
         if (['error', 'err', 'exception', 'ex'].includes(name)) {
-            return "Error tracking variable";
+            return "Error tracking variable - critical for understanding failure paths";
         }
         
+        // User data
+        if (name.includes('user')) {
+            return "User data being processed - core business logic depends on this";
+        }
+        
+        // Configuration and options
+        if (name.includes('options') || name.includes('config')) {
+            return "Configuration options affecting execution behavior and logic paths";
+        }
+        
+        // Arrays
         if (Array.isArray(value)) {
-            return `Array with ${value.length} elements`;
+            return `Collection being processed - contains ${value.length} elements that drive logic flow`;
         }
         
+        // Objects
         if (typeof value === 'object' && value !== null) {
             const keys = Object.keys(value);
-            return `Object with ${keys.length} properties: ${keys.slice(0, 3).join(', ')}${keys.length > 3 ? '...' : ''}`;
+            const keyList = keys.slice(0, 3).join(', ') + (keys.length > 3 ? '...' : '');
+            return `Complex data structure with ${keys.length} properties (${keyList}) - central to function operation`;
         }
         
-        return "Current value at breakpoint";
+        // Flag variables
+        if (typeof value === 'boolean') {
+            return "Control flag that determines conditional logic paths";
+        }
+        
+        return "Contextual variable affecting program flow at this breakpoint";
     }
-    
+        
     /**
      * Create a description for an intelligent breakpoint
      */

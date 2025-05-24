@@ -117,19 +117,7 @@ export class DebuggerIntegration implements vscode.Disposable {
                             // Specifically look for stop events
                             if (message.type === 'event' && message.event === 'stopped') {
                                 console.log(`🔴 BREAKPOINT STOPPED: reason=${message.body?.reason}, threadId=${message.body?.threadId}`);
-                                
-                                // Add a notification so it's clearly visible
-                                vscode.window.showInformationMessage(
-                                    `Breakpoint hit: ${message.body?.reason || 'unknown reason'}`,
-                                    'Inspect', 'Continue'
-                                ).then(selection => {
-                                    if (selection === 'Continue') {
-                                        trackerSession.customRequest('continue', { threadId: message.body.threadId });
-                                    } else if (selection === 'Inspect') {
-                                        vscode.commands.executeCommand('workbench.debug.action.focusVariablesView');
-                                    }
-                                });
-                                
+                              
                                 try {
                                     await this.handleBreakpointHit(trackerSession, message);
                                 } catch (error) {
@@ -346,132 +334,207 @@ export class DebuggerIntegration implements vscode.Disposable {
         
         return variables;
     }
-    
-    // 🆕 New helper method to update debug insights
     private updateDebugInsights(
         fileName: string, 
         lineNumber: number, 
-        variables: any, 
+        variables: Record<string, any>, 
         callStack: string[], 
         dataPoint: any
     ): void {
+        console.log("DebuggerIntegration.updateDebugInsights DISABLED");
+        return; 
         if (!this.debugInsightsProvider) return;
         
-        console.log("Updating debug insights with real-time data");
+        console.log("💡 DebuggerIntegration.updateDebugInsights called");
         
-        const insightData = [];
+        // Create a unique ID for this update
+        const updateId = Date.now() + Math.random().toString(36).substring(2, 9);
+        console.log(`Debug update ${updateId} scheduled`);
         
-        // Add breakpoint location
-        insightData.push({
-            title: `Breakpoint hit at ${fileName.split('/').pop()}:${lineNumber}`,
-            description: `Call stack: ${callStack[0] || 'Main'}`
-        });
+        // Store a copy of the variables to prevent them from being modified
+        const variablesCopy = {...variables};
         
-        // Add variable values
-        for (const [name, value] of Object.entries(variables)) {
+        // Use the timeout to delay the update
+        setTimeout(() => {
+            console.log(`Debug update ${updateId} executing`);
+            
+            // Create insightData INSIDE the timeout
+            const insightData = [];
+            
+            // Add breakpoint location info
             insightData.push({
-                title: `${name} = ${value}`,
-                description: "Current variable value"
+                title: `Breakpoint hit at ${fileName.split('/').pop()}:${lineNumber}`,
+                description: `Call stack: ${callStack[0] || 'Main'}`,
+                iconPath: new vscode.ThemeIcon("debug-breakpoint")
             });
-        }
-        
-        // Add anomaly info if available
-        if (dataPoint && dataPoint.anomalyScore && dataPoint.anomalyScore > 1.0) {
-            insightData.push({
-                title: `Anomaly detected (score: ${dataPoint.anomalyScore.toFixed(2)})`,
-                description: dataPoint.anomalyDetails?.explanation?.explanation || 
-                    "Unusual behavior detected"
-            });
-        }
-        
-        console.log("Updating debug insights with", insightData.length, "items");
-        
-        // Use .refresh() to update the debug insights provider
-        this.debugInsightsProvider.refresh(insightData);
-    }
-    
-    private showAnomalyExplanation(
-        breakpoint: IntelligentBreakpoint, 
-        dataPoint: any
-    ): void {
-        if (!dataPoint.anomalyDetails?.explanation) return;
-        
-        const explanation = dataPoint.anomalyDetails.explanation;
-        
-        const message = new vscode.MarkdownString();
-        message.isTrusted = true;
-        
-        message.appendMarkdown(`## 🔍 AI Anomaly Explanation\n\n`);
-        message.appendMarkdown(`**${explanation.explanation}**\n\n`);
-        
-        message.appendMarkdown(`### Possible Causes:\n`);
-        for (const cause of explanation.possibleCauses) {
-            message.appendMarkdown(`- ${cause}\n`);
-        }
-        
-        message.appendMarkdown(`\n### Suggested Checks:\n`);
-        for (const check of explanation.suggestedChecks) {
-            message.appendMarkdown(`- ${check}\n`);
-        }
-        
-        message.appendMarkdown(`\n*Confidence: ${(explanation.confidence * 100).toFixed(0)}%*`);
-        
-        // Create a new hover to show the explanation
-        const uri = breakpoint.uri;
-        const position = new vscode.Position(breakpoint.line, 0);
-        const range = new vscode.Range(position, position);
-        
-        // Show diagnostic with the explanation
-        const diagnosticCollection = vscode.languages.createDiagnosticCollection('intelligentDebugger');
-        const diagnostic = new vscode.Diagnostic(
-            range,
-            `AI detected anomaly: ${explanation.explanation.substring(0, 100)}...`,
-            vscode.DiagnosticSeverity.Warning
-        );
-        
-        diagnostic.source = 'AI Debugger';
-        diagnosticCollection.set(uri, [diagnostic]);
-        
-        // Also show a notification
-        vscode.window.showWarningMessage(
-            `AI detected anomaly at ${breakpoint.uri.fsPath}:${breakpoint.line + 1}. See Problems panel for details.`,
-            'View Details'
-        ).then(selection => {
-            if (selection === 'View Details') {
-                vscode.commands.executeCommand('workbench.action.problems.focus');
+            
+            // Filter variables from our immutable copy
+            const filteredVariables = this.filterOutNodeInternals(variablesCopy);
+            console.log(`After filtering: ${Object.keys(filteredVariables).length} variables remain`);
+            
+            // Find the most informative variables
+            const topVars = this.findMostInformativeVariables(filteredVariables);
+            console.log(`Top variables selected: ${topVars.map(([name]) => name).join(', ') || 'NONE'}`);
+            
+            if (topVars.length > 0) {
+                // Add a section header for variables
+                insightData.push({
+                    title: "Key Variables",
+                    description: "Most informative variables at this breakpoint",
+                    iconPath: new vscode.ThemeIcon("symbol-variable")
+                });
+                
+                // Add each important variable with context
+                for (const [name, value] of topVars) {
+                    insightData.push({
+                        title: `${name} = ${value}`,
+                        description: this.describeVariableImportance(name, value),
+                        iconPath: new vscode.ThemeIcon("symbol-field")
+                    });
+                }
+            } else {
+                // If no variables were found after filtering, add a message
+                insightData.push({
+                    title: "No application variables found",
+                    description: "Try setting breakpoints in code with more application-specific variables",
+                    iconPath: new vscode.ThemeIcon("info")
+                });
             }
+            
+            // Add execution context
+            if (callStack.length > 1) {
+                insightData.push({
+                    title: "Execution Context",
+                    description: "Call stack leading to this point",
+                    iconPath: new vscode.ThemeIcon("call-incoming")
+                });
+                
+                // Add stack frames (skip the current one)
+                for (let i = 1; i < Math.min(callStack.length, 4); i++) {
+                    insightData.push({
+                        title: callStack[i],
+                        description: `Stack frame ${i}`,
+                        iconPath: new vscode.ThemeIcon("arrow-up")
+                    });
+                }
+            }
+            
+            console.log(`Debug update ${updateId} refreshing view with ${insightData.length} items`);
+            
+            // Finally update the provider
+            this.debugInsightsProvider.refresh(insightData);
+        }, 500);
+    }
+    
+    /**
+ * Comprehensive variable filtering function 
+ */
+private filterOutNodeInternals(variables: Record<string, any>): Record<string, any> {
+    const result: Record<string, any> = {};
+    
+    // Extensive list of Node.js built-ins to filter out
+    const builtins = [
+        'Buffer', 'process', 'global', 'console', 'module', 'require', 'exports',
+        '__dirname', '__filename', 'globalThis', 'clearImmediate', 'clearInterval', 
+        'clearTimeout', 'setImmediate', 'setInterval', 'setTimeout',
+        'queueMicrotask', 'AbortController', 'AbortSignal', 'atob', 'btoa',
+        'Blob', 'crypto', 'fetch', 'BroadcastChannel', 'ByteLengthQueuingStrategy',
+        'CompressionStream', 'CountQueuingStrategy', 'Crypto'
+    ];
+    
+    // Filter out built-ins and system variables
+    for (const [key, value] of Object.entries(variables)) {
+        // Skip if it's in our list or starts with special characters
+        if (builtins.includes(key) || key.startsWith('__') || key === 'this') {
+            continue;
+        }
+        
+        // Skip functions with certain patterns that suggest Node.js internals
+        if (typeof value === 'string' && 
+            value.startsWith('f ') && 
+            (value.includes('mod ??= require(id)') || 
+             value.includes('lazyLoadedValue'))) {
+            continue;
+        }
+        
+        // Keep this variable
+        result[key] = value;
+    }
+    
+    console.log(`DEBUG: Filtered ${Object.keys(variables).length} variables down to ${Object.keys(result).length}`);
+    return result;
+}
+    
+    /**
+     * Find the most informative variables in the current context
+     */
+    private findMostInformativeVariables(variables: Record<string, any>): [string, any][] {
+        const varEntries = Object.entries(variables);
+        
+        // Score variables by informativeness
+        const scoredVars = varEntries.map(([name, value]) => {
+            let score = 0;
+            
+            // User data variables are highly valuable
+            if (name.includes('user') || name.includes('data') || name.includes('options')) score += 5;
+            
+            // Variables that often indicate state
+            if (['i', 'j', 'index', 'key', 'count'].includes(name)) score += 3;
+            if (['value', 'result', 'sum', 'total'].includes(name)) score += 4;
+            if (['error', 'exception', 'status'].includes(name)) score += 5;
+            
+            // Complex objects may be more informative
+            if (typeof value === 'object' && value !== null) score += 2;
+            
+            // Arrays with content
+            if (Array.isArray(value) && value.length > 0) score += 3;
+            
+            return { name, value, score };
         });
-    }
-    
-    private showLLMInsights(breakpoint: IntelligentBreakpoint): void {
-        if (!breakpoint.llmInsights || breakpoint.llmInsights.length === 0) return;
         
-        const message = `🧠 **AI Debug Insights** for breakpoint at ${breakpoint.uri.fsPath}:${breakpoint.line + 1}:\n\n` +
-            breakpoint.llmInsights.map(insight => `- ${insight}`).join('\n');
+        // Sort by score (highest first) and take top 5
+        return scoredVars
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 5)
+            .map(({ name, value }) => [name, value]);
+    }
+    
+    /**
+     * Create a description of why a variable is important
+     */
+    private describeVariableImportance(name: string, value: any): string {
+        if (['i', 'j', 'index', 'idx'].includes(name)) {
+            return "Loop counter/index variable";
+        }
         
-        vscode.window.showInformationMessage(message);
-    }
-    
-    private async getStackFrames(session: vscode.DebugSession, threadId: number): Promise<any[]> {
-        try {
-            const response = await session.customRequest('stackTrace', { threadId });
-            return response.stackFrames || [];
-        } catch (error) {
-            console.error('Error getting stack frames:', error);
-            return [];
+        if (['sum', 'total', 'result', 'accumulated'].includes(name)) {
+            return "Accumulator variable tracking computation progress";
         }
-    }
-    
-    private async getScopes(session: vscode.DebugSession, frameId: number): Promise<any[]> {
-        try {
-            const response = await session.customRequest('scopes', { frameId });
-            return response.scopes || [];
-        } catch (error) {
-            console.error('Error getting scopes:', error);
-            return [];
+        
+        if (['error', 'err', 'exception', 'ex'].includes(name)) {
+            return "Error tracking variable";
         }
+        
+        if (name.includes('user')) {
+            return "User data being processed";
+        }
+        
+        if (name.includes('options') || name.includes('config')) {
+            return "Configuration options affecting execution";
+        }
+        
+        if (Array.isArray(value)) {
+            return `Array with ${value.length} elements`;
+        }
+        
+        if (typeof value === 'object' && value !== null) {
+            const keys = Object.keys(value);
+            return `Object with ${keys.length} properties: ${keys.slice(0, 3).join(', ')}${keys.length > 3 ? '...' : ''}`;
+        }
+        
+        return "Current value at breakpoint";
     }
-    
+
     private async getVariables(session: vscode.DebugSession, scopes: any[], frameId: number): Promise<any> {
         const variables: any = {};
         

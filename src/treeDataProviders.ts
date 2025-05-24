@@ -126,11 +126,18 @@ export class FixSuggestionsProvider implements vscode.TreeDataProvider<Suggestio
 }
 
 
+
+
+// (Remove this duplicate declaration entirely)
 export class InsightDataItem extends vscode.TreeItem {
+    // Add the children property to support hierarchy
+    public children?: InsightDataItem[];
+    
     constructor(
         public readonly label: string,
         private value: string,
-        public readonly collapsibleState: vscode.TreeItemCollapsibleState
+        public readonly collapsibleState: vscode.TreeItemCollapsibleState,
+        public readonly iconPath?: vscode.ThemeIcon
     ) {
         super(label, collapsibleState);
         this.tooltip = value;
@@ -142,15 +149,67 @@ export class DebugInsightsProvider implements vscode.TreeDataProvider<InsightDat
     private _onDidChangeTreeData: vscode.EventEmitter<InsightDataItem | undefined | null | void> = new vscode.EventEmitter();
     readonly onDidChangeTreeData: vscode.Event<InsightDataItem | undefined | null | void> = this._onDidChangeTreeData.event;
     private items: InsightDataItem[] = [];
+    private rawData: any[] = [];
 
-    
     refresh(data?: any[]) {
         if (data && data.length > 0) {
-            this.items = data.map(insight => new InsightDataItem(
-                insight.title || 'Debug Insight',
-                insight.description || '',
-                vscode.TreeItemCollapsibleState.None
-            ));
+            // Convert flat data to hierarchical structure
+            console.log("Refreshing Debug Insights with", data.length, "items");
+            const hierarchicalItems: InsightDataItem[] = [];
+            let currentSection: InsightDataItem | null = null;
+            
+            for (const insight of data) {
+                // Check if this is a section header
+                const isSectionHeader = 
+                    insight.title === "Key Variables" || 
+                    insight.title === "Execution Context" ||
+                    insight.title === "State Variables" ||
+                    insight.title === "Control Variables" || 
+                    insight.title === "Data Variables" ||
+                    insight.title === "Other Variables";
+                
+                if (isSectionHeader) {
+                    // Create a new section with expanded state
+                    currentSection = new InsightDataItem(
+                        insight.title,
+                        insight.description || '',
+                        vscode.TreeItemCollapsibleState.Expanded,
+                        insight.iconPath
+                    );
+                    currentSection.children = []; // Initialize children array
+                    hierarchicalItems.push(currentSection);
+                }
+                // If this is a breakpoint hit or other top-level item
+                else if (insight.title.startsWith("Breakpoint hit") || 
+                        insight.title.includes("Issue") ||
+                        currentSection === null) {
+                    // Add as top-level item
+                    hierarchicalItems.push(new InsightDataItem(
+                        insight.title,
+                        insight.description || '',
+                        vscode.TreeItemCollapsibleState.None,
+                        insight.iconPath
+                    ));
+                }
+                // Otherwise add as child to current section
+                else if (currentSection) {
+                    // Add this insight as a child of the current section
+                    currentSection.children!.push(new InsightDataItem(
+                        insight.title,
+                        insight.description || '',
+                        vscode.TreeItemCollapsibleState.None,
+                        insight.iconPath
+                    ));
+                }
+            }
+            
+            // Use the hierarchical items instead of flat list
+            this.items = hierarchicalItems;
+            this.rawData = data || [];
+
+            // Log the structure we created
+            console.log("Debug insights refreshed with sections:", hierarchicalItems.map(i => 
+                `${i.label} (${i.children?.length || 0} children)`).join(", "));
         } else {
             // Default items when no data is available
             this.items = [
@@ -167,8 +226,19 @@ export class DebugInsightsProvider implements vscode.TreeDataProvider<InsightDat
     getTreeItem(element: InsightDataItem): vscode.TreeItem {
         return element;
     }
+
+    getData(): any[] {
+        return this.rawData;
+    }
+    
     
     getChildren(element?: InsightDataItem): Thenable<InsightDataItem[]> {
-        return Promise.resolve(this.items);
+        if (element) {
+            // Return children of the specified element
+            return Promise.resolve(element.children || []);
+        } else {
+            // Return root items
+            return Promise.resolve(this.items);
+        }
     }
 }
