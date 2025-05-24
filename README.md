@@ -1,83 +1,83 @@
 # 🧠 CoDebugger.ai
+AI-powered debugging assistant for VS Code...
 
-
-An AI-powered debugging assistant for **VS Code** that identifies optimal debugging points, analyzes code execution, and provides intelligent insights to help you solve issues faster.
+**AI-powered debugging assistant for VS Code** that identifies optimal debugging points, analyzes code execution, and provides intelligent insights to help you solve issues faster.
 
 ---
 
 ## ✨ Features
 
-- **Smart Breakpoint Placement**: Automatically identifies and sets breakpoints at critical locations
-- **Runtime Insight Analysis**: Provides AI-driven insights during debugging sessions
-- **Variable Analysis**: Explains variable behavior and detects anomalies
-- **Root Cause Detection**: Intelligently identifies potential causes of bugs
-- **Fix Suggestions**: Offers potential solutions for identified issues
-- **Interactive Debugging**: Ask questions about variables during debugging sessions
+- **Smart Breakpoint Placement**: Automatically sets breakpoints at key locations based on your debugging goal  
+- **Runtime Insight Analysis**: Provides AI-generated insights during debugging sessions  
+- **Variable Analysis**: Explains variable behavior and detects anomalies in real-time  
+- **Root Cause Detection**: Intelligently identifies potential causes of bugs  
+- **Fix Suggestions**: Offers potential solutions to identified issues  
+- **Interactive Debugging**: Ask questions about variables during active debugging  
+- **Multiple AI Providers**: Supports OpenAI, Anthropic, Google, and local LLMs  
 
 ---
 
 ## 🛠️ Installation
 
-1. Open **Visual Studio Code**
-2. Go to Extensions (`Ctrl+Shift+X` / `Cmd+Shift+X`)
-3. Search for **"CoDebugger.ai"**
+1. Open **Visual Studio Code**  
+2. Go to **Extensions** (Ctrl+Shift+X / Cmd+Shift+X)  
+3. Search for `CoDebugger.ai`  
 4. Click **Install**
 
 ---
 
 ## ⚙️ Configuration
 
-### 🔑 API Key Setup
+### 🔑 AI Provider Setup
 
-The extension requires an API key from your preferred AI provider (OpenAI, Anthropic, or Google).
+You can configure AI access in one of three ways:
 
-#### Option 1: Using `config.ts` (Recommended)
+#### Option 1: Configuration Wizard (Recommended)
 
-Create or edit the file at `src/config.ts`:
+- Click the `Configure AI` button in the status bar  
+- Follow the 4-step wizard:
+  1. Select AI provider (OpenAI, Anthropic, Google, Local)
+  2. Enter your API key
+  3. Choose your preferred model
+  4. Set additional parameters (e.g., temperature)
 
-```
+#### Option 2: Manual Configuration
+
+Create or edit the file: `src/config.ts`
+
+```ts
 /**
  * Configuration file for API keys
  * DO NOT COMMIT THIS FILE TO VERSION CONTROL
  */
-
 export const API_KEYS = {
     OPENAI: 'your-openai-api-key-here',
-    ANTHROPIC: '', // Your Anthropic key if needed
-    GOOGLE: '',    // Your Google key if needed
+    ANTHROPIC: '', // Your Anthropic key
+    GOOGLE: '',    // Your Google key
 };
-```
 
-✅ **Be sure to add `src/config.ts` to your `.gitignore`.**
-
----
-
-### Option 2: Using VS Code Command Palette
-
-1. Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`)
-2. Type and select: **"Intelligent Debugger: Set API Key Manually"**
-3. Choose your LLM provider and enter the API key
+✅ **Make sure `src/config.ts` is listed in `.gitignore`.**
 
 ---
 
-### Option 3: Using VS Code Settings UI
+## Option 3: VS Code Settings
 
-1. Go to Settings (`Ctrl+,` / `Cmd+,`)
-2. Search for **"Intelligent Debugger"**
-3. Enter your API key in the **"LLM API Key"** field
-4. Select your preferred **LLM Provider**
+1. Open **Settings** (Ctrl+, / Cmd+,)
+2. Search for **Intelligent Debugger**
+3. Enter your **AI provider** and **API key**
 
 ---
 
-### 🔧 Additional Settings
+## 🔧 Available Settings
 
-| Setting              | Description                                              | Default           |
-|----------------------|----------------------------------------------------------|-------------------|
-| **LLM Provider**      | Select AI provider (OpenAI, Anthropic, Google, Local)   | `OpenAI`          |
-| **LLM Model**         | AI model to use                                          | `gpt-3.5-turbo`   |
-| **Max Breakpoints**   | Max number of intelligent breakpoints                   | `10`              |
-| **Enable AI Analysis**| Turn AI-powered analysis on/off                         | `on`              |
-| **Local LLM Endpoint**| URL for local LLM server if using "local" option        | *(empty)*         |
+| Setting           | Description                             | Default                   |
+|-------------------|-----------------------------------------|---------------------------|
+| `llmProvider`     | Select AI provider                      | `openai`                  |
+| `llmModel`        | AI model to use                         | `gpt-4`                   |
+| `temperature`     | Creativity of AI responses (0.0–1.0)    | `0.7`                     |
+| `maxTokens`       | Max token count in AI responses         | `2048`                    |
+| `maxBreakpoints`  | Max intelligent breakpoints             | `10`                      |
+| `localLLMEndpoint`| Local LLM server endpoint if applicable | `http://localhost:8080/v1`|
 
 ---
 
@@ -85,11 +85,21 @@ export const API_KEYS = {
 
 ### 🔍 Basic Workflow
 
-1. Open your **JavaScript/TypeScript** project in **VS Code**
-2. Run **"Start Intelligent Code Analysis"** from the Command Palette
-3. The extension will analyze your code and set intelligent breakpoints
-4. Start debugging as usual
-5. Review AI-generated insights in the **AI Debugger** panel
+1. Open your **JavaScript/TypeScript** project
+2. Click the **Configure AI** button
+3. Run **Start Intelligent Code Analysis** from the Command Palette
+4. Enter your debugging goal (e.g., `"user authentication"`)
+
+The extension will:
+
+- Analyze your code  
+- Set intelligent breakpoints  
+- Provide runtime insights  
+
+Then:
+
+- Start debugging  
+- View insights in the **Debug Insights** panel
 
 ---
 
@@ -97,47 +107,60 @@ export const API_KEYS = {
 
 While paused at a breakpoint:
 
-- **Option 1**: Right-click a variable in the editor → *"Ask About Selected Variable"*
-- **Option 2**: Click the **"Ask About Any Variable"** button in the debug toolbar
+- Right-click a variable → **Ask About Selected Variable**  
+- OR click **Ask About Any Variable** in the debug toolbar
 
-The AI will provide detailed explanations in the output panel.
+The AI will give you insights into the variable’s:
+
+- Current value  
+- Purpose  
+- Behavior  
 
 ---
 
 ### 📊 View Debug Insights
 
-Click the **AI Debugger** icon in the Activity Bar to explore:
+The **Debug Insights Panel** shows:
 
-- **Intelligent Breakpoints**: Where and why breakpoints were placed
-- **Debug Insights**: Runtime insights and anomaly detection
-- **Root Cause Analysis**: Potential causes of issues
-- **Fix Suggestions**: AI-suggested solutions
+- **Key Variables**: Variables affecting control flow  
+- **Execution Context**: Current call stack and execution path  
+- **Potential Issues**: Detected anomalies or bugs  
+- **Fix Suggestions**: AI-generated solutions  
+
+---
+
+### 🎯 Focused Debugging
+
+1. Run **Start Intelligent Debug**
+2. Enter your debugging focus (e.g., `"user validation"`)
+3. The AI will target breakpoints relevant to that area
 
 ---
 
 ## ⌨️ Key Commands
 
-| Command                          | Description                                       |
-|----------------------------------|---------------------------------------------------|
-| Start Intelligent Code Analysis  | Analyze code and set intelligent breakpoints      |
-| View Debug Insights              | Open the debug insights panel                     |
-| Ask About Selected Variable      | Ask about the currently selected variable         |
-| Ask About Any Variable           | Choose a variable to question                     |
-| Set Custom Debug Prompt          | Create a custom debugging prompt                  |
-| Set API Key Manually             | Configure API key via UI                          |
-| Start Intelligent Debugging      | Begin debugging with AI assistance                |
+| Command                      | Description                            |
+|-----------------------------|----------------------------------------|
+| Configure AI Settings       | Set up AI provider                     |
+| Start Intelligent Debug     | Begin a focused debugging session      |
+| View Debug Insights         | Open the insights panel                |
+| Ask About Selected Variable | Ask AI about selected variable         |
+| Set Custom Debug Prompt     | Set a prompt at the current line       |
+| Start Intelligent Analysis  | Analyze and set intelligent breakpoints|
+| Test Debugging Session      | Run a test debugging flow              |
 
 ---
 
 ## 🧬 Technical Details
 
-The extension leverages advanced techniques:
+This extension uses advanced techniques:
 
-- **Static Code Analysis**: Builds a code flow graph to find critical points
-- **Runtime Data Collection**: Captures variable values & execution context
-- **AI-Powered Analysis**: Uses LLMs to understand code and behavior
-- **Anomaly Detection**: Detects unusual patterns in variable values or logic
-- **Causal Analysis**: Infers potential causes of bugs
+- **Static Code Analysis**: Builds flow graphs
+- **Runtime Data Collection**: Tracks live variable values
+- **AI-Powered Analysis**: Uses LLMs for deep code understanding
+- **Anomaly Detection**: Identifies unusual logic or values
+- **Causal Analysis**: Traces potential causes of bugs
+- **Information Gain Optimization**: Places breakpoints strategically
 
 ---
 
@@ -145,28 +168,28 @@ The extension leverages advanced techniques:
 
 ### ❗ API Key Issues
 
-- Ensure your key is set in `src/config.ts` or VS Code settings
-- Confirm the correct LLM provider is selected
-- Retry using the manual command: **Set API Key Manually**
-- Verify API access to the model (especially for OpenAI)
+- Check the status bar to verify active config  
+- Use the configuration wizard if needed  
+- Confirm access to your AI provider (e.g., OpenAI)  
+- For local LLMs, ensure your server is up and reachable  
 
-### 🐢 Performance Issues
+### 🐢 Performance Tips
 
-- Reduce **Max Breakpoints** in settings
-- Use a faster model like **gpt-3.5-turbo**
-- Analyze specific files instead of the whole project
+- Use faster models like `gpt-3.5-turbo`  
+- Limit the number of breakpoints  
+- Focus debugging on specific files or functions  
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+We welcome contributions! See [CONTRIBUTING.md](./CONTRIBUTING.md) for more info.
 
 ---
 
 ## 📄 License
 
-This extension is licensed under the **MIT License**. See [LICENSE](./LICENSE) for details.
+Licensed under the [MIT License](./LICENSE).
 
 ---
 

@@ -4,13 +4,30 @@
     "description": "AI-powered debugging assistant that identifies optimal debugging points and provides intelligent insights",
     "version": "0.1.0",
     "license": "MIT",
+    "publisher": "YashwanthNandam",
+    "icon": "resources/debugger-icon.png",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/yashwanthnandam/codebugger-ai"
+    },
     "engines": {
         "vscode": "^1.60.0"
     },
     "categories": [
         "Debuggers",
         "Other"
-    ],
+      ],
+    "galleryBanner": {
+        "color": "#1e415e",
+        "theme": "dark"
+      },
+    "keywords": [
+        "debugging",
+        "ai",
+        "breakpoints",
+        "analysis",
+        "javascript"
+      ],
     "activationEvents": [
         "onCommand:intelligent-debugger.startAnalysis",
         "onDebug"
