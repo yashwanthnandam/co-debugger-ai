@@ -104,16 +104,6 @@
         "configuration": {
             "title": "Intelligent Debugger",
             "properties": {
-                "intelligentDebugger.maxBreakpoints": {
-                    "type": "number",
-                    "default": 10,
-                    "description": "Maximum number of intelligent breakpoints to set"
-                },
-                "intelligentDebugger.enableAIAnalysis": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable AI-powered analysis of debugging data"
-                },
                 "intelligentDebugger.llmProvider": {
                     "type": "string",
                     "enum": [
@@ -125,15 +115,37 @@
                     "default": "openai",
                     "description": "LLM provider to use for AI analysis"
                 },
-                "intelligentDebugger.llmApiKey": {
-                    "type": "string",
-                    "default": "",
-                    "description": "API key for the selected LLM provider"
-                },
                 "intelligentDebugger.llmModel": {
                     "type": "string",
                     "default": "gpt-3.5-turbo",
                     "description": "Model to use for AI analysis (options depend on provider)"
+                },
+                "intelligentDebugger.temperature": {
+                    "type": "number",
+                    "default": 0.7,
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Temperature setting for AI model (0.0-1.0)"
+                },
+                "intelligentDebugger.maxTokens": {
+                    "type": "number",
+                    "default": 2048,
+                    "description": "Maximum number of tokens to generate"
+                },
+                "intelligentDebugger.openaiApiKey": {
+                    "type": "string",
+                    "default": "",
+                    "description": "API key for OpenAI (leave empty if using environment variable)"
+                },
+                "intelligentDebugger.anthropicApiKey": {
+                    "type": "string",
+                    "default": "",
+                    "description": "API key for Anthropic (leave empty if using environment variable)"
+                },
+                "intelligentDebugger.googleApiKey": {
+                    "type": "string",
+                    "default": "",
+                    "description": "API key for Google AI (leave empty if using environment variable)"
                 },
                 "intelligentDebugger.localLLMEndpoint": {
                     "type": "string",

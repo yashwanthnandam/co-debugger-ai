@@ -25,6 +25,81 @@ export class BreakpointRanker {
         // Return sorted nodes
         return scoredNodes.map(item => item.node);
     }
+
+    /**
+     * Rank nodes for breakpoints with a specific debugging focus
+     */
+    public async rankNodesForBreakpointsWithFocus(nodes: any[], debugFocus: string): Promise<any[]> {
+        // Create a copy of nodes to rank
+        const nodesToRank = [...nodes];
+
+        // Compute relevance scores based on the debug focus
+        for (const node of nodesToRank) {
+            // Base score from standard ranking
+            const baseScore = this.calculateBreakpointScore(node);
+            
+            // Calculate relevance to debugging focus
+            const focusRelevance = this.calculateFocusRelevance(node, debugFocus);
+            
+            // Combine scores, giving higher weight to focus relevance
+            node.rankingScore = baseScore * 0.4 + focusRelevance * 0.6;
+        }
+        
+        // Sort by the new combined score
+        nodesToRank.sort((a, b) => b.rankingScore - a.rankingScore);
+        
+        return nodesToRank;
+    }
+
+/**
+ * Calculate how relevant a node is to the debugging focus
+ */
+private calculateFocusRelevance(node: any, debugFocus: string): number {
+    let score = 0;
+    const focusLower = debugFocus.toLowerCase();
+    
+    // Check if node's code snippet contains terms from the debug focus
+    if (node.snippet) {
+        const snippetLower = node.snippet.toLowerCase();
+        if (snippetLower.includes(focusLower)) {
+            score += 3; // Direct mention is highly relevant
+        }
+        
+        // Check for related terms
+        const terms = focusLower.split(/\s+/);
+        for (const term of terms) {
+            if (term.length >= 4 && snippetLower.includes(term)) {
+                score += 1;
+            }
+        }
+    }
+    
+    // Check if functionality/metadata matches the focus
+    if (node.metadata) {
+        // Focus on validation code
+        if (focusLower.includes('valid') && 
+            (node.snippet?.toLowerCase().includes('valid') || 
+             node.name?.toLowerCase().includes('valid'))) {
+            score += 2;
+        }
+        
+        // Focus on error handling
+        if ((focusLower.includes('error') || focusLower.includes('exception')) &&
+            node.metadata.isErrorHandling) {
+            score += 3;
+        }
+        
+        // Focus on data processing
+        if ((focusLower.includes('process') || focusLower.includes('data')) &&
+            (node.snippet?.toLowerCase().includes('process') || 
+             node.name?.toLowerCase().includes('process') ||
+             node.metadata.isDataProcessing)) {
+            score += 2;
+        }
+    }
+    
+    return Math.min(score, 5) / 5; // Normalize to 0-1 scale
+}
     
     private calculateBreakpointScore(node: CodeNode): number {
         let score = 0;

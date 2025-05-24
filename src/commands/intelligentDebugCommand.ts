@@ -91,92 +91,104 @@ export class IntelligentDebugCommand {
     /**
      * Execute the intelligent debug command
      */
-    public async execute(): Promise<void> {
-        // Get active editor
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            vscode.window.showErrorMessage("No active editor. Open a file to debug.");
-            return;
-        }
-        
-        const document = editor.document;
-        const filePath = document.uri.fsPath;
-        
-        // Verify it's a supported file type
-        if (!this.isSupportedFileType(filePath)) {
-            vscode.window.showErrorMessage(
-                "This file type is not supported for intelligent debugging. Supported types: .js, .ts, .jsx, .tsx"
-            );
-            return;
-        }
-        
-        // Save the file before debugging
-        if (document.isDirty) {
-            await document.save();
-        }
-        
-        // Update UI to show we're analyzing
-        this.updateStatusBar('analyzing');
-        
-        // Show welcome message if this is the first time
-        const hasShownWelcome = this.context.globalState.get('intelligentDebugger.hasShownWelcome');
-        if (!hasShownWelcome) {
-            this.showWelcomeMessage();
-            this.context.globalState.update('intelligentDebugger.hasShownWelcome', true);
-        }
-        
-        // Start the intelligent debugging process
-        await vscode.window.withProgress(
-            {
-                location: vscode.ProgressLocation.Notification,
-                title: "Preparing Intelligent Debugging",
-                cancellable: true
-            },
-            async (progress, token) => {
-                progress.report({ increment: 0, message: "Analyzing code..." });
+    /**
+ * Execute the intelligent debug command with optional debugging focus
+ */
+public async execute(): Promise<void> {
+    // Get active editor
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        vscode.window.showErrorMessage("No active editor. Open a file to debug.");
+        return;
+    }
+    
+    const document = editor.document;
+    const filePath = document.uri.fsPath;
+    
+    // Verify it's a supported file type
+    if (!this.isSupportedFileType(filePath)) {
+        vscode.window.showErrorMessage(
+            "This file type is not supported for intelligent debugging. Supported types: .js, .ts, .jsx, .tsx"
+        );
+        return;
+    }
+    
+    // Ask user what they want to focus on debugging (NEW!)
+    const debugFocus = await vscode.window.showInputBox({
+        prompt: "What do you want to focus on debugging? (e.g., 'user validation', 'data processing', or leave empty for general debugging)",
+        placeHolder: "Enter debugging goal or focus area...",
+    });
+    
+    // Save the file before debugging
+    if (document.isDirty) {
+        await document.save();
+    }
+    
+    // Update UI to show we're analyzing
+    this.updateStatusBar('analyzing');
+    
+    // Show welcome message if this is the first time
+    const hasShownWelcome = this.context.globalState.get('intelligentDebugger.hasShownWelcome');
+    if (!hasShownWelcome) {
+        this.showWelcomeMessage();
+        this.context.globalState.update('intelligentDebugger.hasShownWelcome', true);
+    }
+    
+    // Start the intelligent debugging process
+    await vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: "Preparing Intelligent Debugging",
+            cancellable: true
+        },
+        async (progress, token) => {
+            progress.report({ increment: 0, message: "Analyzing code..." });
+            
+            try {
+                // Step 1: Analyze the code
+                await this.codeAnalyzer.analyzeCode(document.getText(), document.fileName);
+                progress.report({ increment: 30, message: "Finding optimal breakpoints..." });
                 
-                try {
-                    // Step 1: Analyze the code
-                    await this.codeAnalyzer.analyzeCode(document.getText(), document.fileName);
-                    progress.report({ increment: 30, message: "Finding optimal breakpoints..." });
-                    
-                    if (token.isCancellationRequested) return;
-                    
-                    // Step 2: Find optimal breakpoints
-                    const nodes = Array.from(this.codeAnalyzer.getNodes().values());
-                    
-                    // Skip if no nodes found
-                    if (nodes.length === 0) {
-                        vscode.window.showWarningMessage(
-                            "No code structure found for intelligent debugging. Running with standard debugging."
-                        );
-                        this.launchDebugger(filePath);
-                        return;
-                    }
-                    
-                    // Rank nodes for breakpoints
-                    const rankedNodes = this.breakpointRanker.rankNodesForBreakpoints(nodes);
-                    progress.report({ increment: 20, message: "Setting breakpoints..." });
-                    
-                    if (token.isCancellationRequested) return;
-                    
-                    // Step 3: Set intelligent breakpoints
-                    // Clear existing breakpoints
-                    this.breakpointManager.clearBreakpoints();
-                    vscode.debug.removeBreakpoints(vscode.debug.breakpoints);
-                    
-                    // Set new breakpoints based on ranked nodes
-                    const topN = Math.min(5, rankedNodes.length); // Limit to top 5 breakpoints
-                    for (let i = 0; i < topN; i++) {
-                        const node = rankedNodes[i];
-                        await this.breakpointManager.addBreakpoint(
-                            document.uri,
-                            node.location.line - 1, // VS Code is 0-based
-                            node.location.column,
-                            node.id,
-                            this.getBreakpointDescription(node)
-                        );
-                    }
+                if (token.isCancellationRequested) return;
+                
+                // Step 2: Find optimal breakpoints
+                const nodes = Array.from(this.codeAnalyzer.getNodes().values());
+                
+                // Skip if no nodes found
+                if (nodes.length === 0) {
+                    vscode.window.showWarningMessage(
+                        "No code structure found for intelligent debugging. Running with standard debugging."
+                    );
+                    this.launchDebugger(filePath);
+                    return;
+                }
+                
+                // Rank nodes for breakpoints - consider debug focus if provided
+                const rankedNodes = debugFocus ? 
+                    await this.breakpointRanker.rankNodesForBreakpointsWithFocus(nodes, debugFocus) :
+                    this.breakpointRanker.rankNodesForBreakpoints(nodes);
+                
+                progress.report({ increment: 20, message: "Setting breakpoints..." });
+                
+                if (token.isCancellationRequested) return;
+                
+                // Step 3: Set intelligent breakpoints
+                // Clear existing breakpoints
+                this.breakpointManager.clearBreakpoints();
+                vscode.debug.removeBreakpoints(vscode.debug.breakpoints);
+                
+                // Set new breakpoints based on ranked nodes
+                const topN = Math.min(5, rankedNodes.length); // Limit to top 5 breakpoints
+                for (let i = 0; i < topN; i++) {
+                    const node = rankedNodes[i];
+                    await this.breakpointManager.addBreakpoint(
+                        document.uri,
+                        node.location.line - 1, // VS Code is 0-based
+                        node.location.column,
+                        node.id,
+                        this.getBreakpointDescription(node, debugFocus) // Pass focus to description
+                    );
+                }
                     
                     progress.report({ increment: 20, message: "Preparing debug insights..." });
                     
@@ -682,37 +694,42 @@ export class IntelligentDebugCommand {
     /**
      * Create a description for an intelligent breakpoint
      */
-    private getBreakpointDescription(node: any): string {
+    private getBreakpointDescription(node: any, debugFocus?: string): string {
         // Use your analysis to describe why this breakpoint is important
-        // This is a simplified version
+        const reasons: string[] = [];
         
         if (node.metadata.isCritical) {
-            return "Critical code path - important for program correctness";
+            reasons.push("Critical code path - important for program correctness");
         }
         
         if (node.metadata.isLoop) {
-            return "Loop entry point - good for tracking iterations";
+            reasons.push("Loop entry point - good for tracking iterations");
         }
         
         if (node.metadata.isBranch) {
-            return "Branch condition - determines execution path";
+            reasons.push("Branch condition - determines execution path");
         }
         
         if (node.metadata.isErrorHandling) {
-            return "Error handling code - helps diagnose failures";
+            reasons.push("Error handling code - helps diagnose failures");
         }
         
         if (node.metadata.semanticComplexity && node.metadata.semanticComplexity > 2) {
-            return "Complex code section - high cognitive complexity";
+            reasons.push("Complex code section - high cognitive complexity");
         }
         
         if (node.metadata.potentialBugs && node.metadata.potentialBugs.length > 0) {
-            return `Potential issue: ${node.metadata.potentialBugs[0]}`;
+            reasons.push(`Potential issue: ${node.metadata.potentialBugs[0]}`);
         }
         
-        return "Intelligent breakpoint based on code analysis";
+        // Add context about the debug focus if provided
+        if (debugFocus) {
+            reasons.push(`Relevant to "${debugFocus}" debugging focus`);
+        }
+        
+        return reasons.join(". ");
     }
-    
+        
     /**
      * Extract potential issues from the analyzed nodes
      */

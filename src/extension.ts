@@ -4,7 +4,6 @@ import * as path from 'path';
 import * as os from 'os';
 import { CodeAnalyzer } from './codeAnalyzer';
 import { IntelligentDebugCommand } from './commands/intelligentDebugCommand';
-
 import { BreakpointManager } from './breakpointManager';
 import { DataCollector } from './dataCollector';
 import { DebuggerIntegration } from './debuggerIntegration';
@@ -16,6 +15,8 @@ import { InformationGainAnalyzer } from './informationGain';
 import { BreakpointsProvider, RootCauseProvider, FixSuggestionsProvider, DebugInsightsProvider } from './treeDataProviders';
 import { PromptVariableCommand } from './commands/promptVariableCommand';
 import { BreakpointRanker } from './algorithms/breakPointRanker';
+import { ConfigurationWizard } from './configurationWizard';
+
 // Create a single instance of the LLM service to be shared
 let llmService: LLMService;
 
@@ -27,7 +28,7 @@ let debugInsightsProvider: DebugInsightsProvider;
 const breakpointRanker = new BreakpointRanker();
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('co-debugger-ai extension is now active');
+    console.log('intelligent-debugger extension is now active');
 
     // Initialize LLM service
     llmService = new LLMService();
@@ -111,11 +112,40 @@ export function activate(context: vscode.ExtensionContext) {
     
     const promptManager = new ConversationalPrompts(context, llmService);
 
-    // Register LLM configuration command
+    // Register LLM configuration command with the wizard
     let configureLLMCmd = vscode.commands.registerCommand('intelligent-debugger.configureLLM', async () => {
-        await llmService.configureLLM();
+        try {
+            const config = await ConfigurationWizard.collectParameters();
+            if (config) {
+                // Update the LLM service with new configuration
+                await llmService.updateConfiguration(config);
+                vscode.window.showInformationMessage('AI configuration updated successfully!');
+                
+                // REMOVE or FIX this line that's causing the error:
+                // await vscode.commands.executeCommand('workbench.view.extension.intelligent-debugger-insights');
+                
+                // Instead, try one of these alternatives:
+                // Option 1: Show debug insights if that command exists
+                try {
+                    await vscode.commands.executeCommand('intelligent-debugger.viewInsights');
+                } catch (e) {
+                    // Silently ignore if command not found
+                }
+                
+                // Option 2: Simply focus the debug panel if it exists
+                try {
+                    await vscode.commands.executeCommand('workbench.view.debug');
+                } catch (e) {
+                    // Silently ignore if command not found
+                }
+                
+                // Update status bar
+                updateLlmStatus();
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Configuration error: ${error.message}`);
+        }
     });
-
     
     // Register start analysis command
     let startAnalysisCmd = vscode.commands.registerCommand('intelligent-debugger.startAnalysis', async () => {
@@ -183,8 +213,6 @@ export function activate(context: vscode.ExtensionContext) {
         });
     });
 
-    
-
     let testDebugCmd = vscode.commands.registerCommand('intelligent-debugger.testDebug', async () => {
         // Create a simple test file
         const testCode = `
@@ -248,7 +276,6 @@ export function activate(context: vscode.ExtensionContext) {
         await vscode.debug.startDebugging(vscode.workspace.workspaceFolders?.[0], config);
     });
     
-    context.subscriptions.push(testDebugCmd);
     // Register custom prompt command
     let setCustomPromptCmd = vscode.commands.registerCommand('intelligent-debugger.setCustomPrompt', async () => {
         const editor = vscode.window.activeTextEditor;
@@ -295,12 +322,48 @@ export function activate(context: vscode.ExtensionContext) {
     // Register debug session event handlers
     debuggerIntegration.registerEventHandlers();
 
+    // Show AI configuration status in status bar
+    const llmStatusBarItem = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Right,
+        100
+    );
+    llmStatusBarItem.text = "$(settings-gear) Configure AI";
+    llmStatusBarItem.tooltip = "Configure AI settings for intelligent debugging";
+    llmStatusBarItem.command = "intelligent-debugger.configureLLM";
+    context.subscriptions.push(llmStatusBarItem);
+    llmStatusBarItem.show();
+
+    // Update status bar with current AI configuration
+    const updateLlmStatus = () => {
+        const config = vscode.workspace.getConfiguration('intelligentDebugger');
+        const provider = config.get('llmProvider');
+        const model = config.get('llmModel');
+        const apiKey = config.get(`${provider}ApiKey`, '');
+        
+        if (apiKey) {
+            llmStatusBarItem.text = `$(check) ${provider}: ${model}`;
+            llmStatusBarItem.backgroundColor = undefined;
+        } else {
+            llmStatusBarItem.text = `$(warning) AI Not Configured`;
+            llmStatusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        }
+    };
+
+    // Run initially and whenever configuration changes
+    updateLlmStatus();
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('intelligentDebugger')) {
+            updateLlmStatus();
+        }
+    }));
+
     // Add all disposables to context
     context.subscriptions.push(
         startAnalysisCmd,
         setCustomPromptCmd,
         viewInsightsCmd,
         configureLLMCmd,
+        testDebugCmd,
         debuggerIntegration
     );
 }
