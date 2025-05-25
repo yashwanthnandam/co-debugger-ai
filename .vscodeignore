@@ -11,3 +11,5 @@ src/
 test/
 tests/
 *.md
+webpack.config.js
+

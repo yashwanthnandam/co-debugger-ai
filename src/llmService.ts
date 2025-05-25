@@ -1,10 +1,8 @@
-import * as dotenv from 'dotenv';
 import * as vscode from 'vscode';
 import axios from 'axios';
 import OpenAI from 'openai';
 import { API_KEYS } from './config';
 
-dotenv.config();
 
 export interface LLMAnalysisResult {
     suggestions: string[];
