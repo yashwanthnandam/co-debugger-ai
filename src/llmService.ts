@@ -44,6 +44,7 @@ export class LLMService {
     private model: string;
     private temperature: number;
     private localEndpoint: string;
+    private projectContext: Map<string, string> = new Map();
     
     // Client instances
     private openaiClient: OpenAI | null = null;
@@ -455,6 +456,143 @@ Format your response as a JSON object with these fields:
     }
     
     /**
+     * Generate insights for debugging session data
+     */
+    public async generateDebugInsight(
+        fileName: string, 
+        lineNumber: number, 
+        codeSnippet: string, 
+        variables: string,
+        callStack: string[]
+    ): Promise<{ 
+        explanation: string, 
+        keyVariables?: Array<{name: string, explanation: string}>,
+        potentialIssues?: string[]
+    }> {
+        try {
+            // Format call stack for the LLM
+            const formattedCallStack = callStack?.length > 0 ? 
+                callStack.slice(0, 3).join('\n') : 
+                "No call stack available";
+                
+            // Create the LLM prompt
+            const systemPrompt = 
+                "You are an expert debugging assistant analyzing real-time debugging data. " +
+                "Provide clear, concise explanations of code behavior at specific breakpoints. " +
+                "Focus on the key variables, their meaning, and any potential issues.";
+                
+            const prompt = `
+    You are analyzing a debugging session at ${fileName}:${lineNumber}.
+
+    CODE:
+    \`\`\`
+    ${codeSnippet}
+    \`\`\`
+
+    VARIABLES AT BREAKPOINT:
+    \`\`\`
+    ${variables}
+    \`\`\`
+
+    CALL STACK:
+    \`\`\`
+    ${formattedCallStack}
+    \`\`\`
+
+    Provide a clear, concise explanation of what's happening at this breakpoint. Focus on:
+    1. What the code is doing at this specific line
+    2. The meaning and significance of key variables 
+    3. Any potential issues or anomalies in the variables or code flow
+
+    Output in this format:
+    - A paragraph explaining what's happening in plain English
+    - Up to 3 key variables with explanations of their meaning/significance
+    - Any potential issues you detect (be specific)
+
+    Keep your explanation helpful for a developer trying to understand their code's behavior.
+    `;
+
+            // Call the LLM using the existing method
+            const response = await this.callLLM(prompt, systemPrompt);
+            
+            if (!response) {
+                throw new Error("Failed to get response from LLM");
+            }
+            
+            // Parse the response
+            const insight = this.parseDebugInsight(response);
+            return insight;
+            
+        } catch (error) {
+            console.error('Error getting LLM insight:', error);
+            return {
+                explanation: "Unable to generate AI explanation. You can still view the raw variables below."
+            };
+        }
+    }
+
+    /**
+     * Parse debug insight from LLM response
+     */
+    private parseDebugInsight(response: string): { 
+        explanation: string, 
+        keyVariables?: Array<{name: string, explanation: string}>,
+        potentialIssues?: string[]
+    } {
+        try {
+            // Default result with just the raw response in case parsing fails
+            const defaultResult = {
+                explanation: response
+            };
+            
+            // Extract the main explanation (first paragraph)
+            const mainExplanationMatch = response.match(/(.+?)(?=\n\n|$)/s);
+            const mainExplanation = mainExplanationMatch ? mainExplanationMatch[0] : response;
+            
+            // Extract key variables section
+            const keyVariables: Array<{name: string, explanation: string}> = [];
+            const variableMatches = response.matchAll(/[•-]\s*(?:`|')?([a-zA-Z0-9_]+)(?:`|')?[\s:]+([^\n]+)/g);
+            
+            for (const match of variableMatches) {
+                if (match[1] && match[2]) {
+                    keyVariables.push({
+                        name: match[1],
+                        explanation: match[2].trim()
+                    });
+                }
+            }
+            
+            // Extract potential issues
+            const issues: string[] = [];
+            // Look for a section that might start with "potential issues", "issues", etc.
+            const issuesSectionMatch = response.match(/(?:potential issues|issues|problems|anomalies|concerns)(?:\s*detected)?(?:\s*:|:?\s*\n)([\s\S]+?)(?=\n\n|$)/i);
+            
+            if (issuesSectionMatch && issuesSectionMatch[1]) {
+                const issuesText = issuesSectionMatch[1].trim();
+                const issueSplit = issuesText.split(/\n[•-]\s*/);
+                
+                for (const issue of issueSplit) {
+                    const trimmed = issue.trim();
+                    if (trimmed && trimmed.length > 5) {
+                        issues.push(trimmed);
+                    }
+                }
+            }
+            
+            return {
+                explanation: mainExplanation,
+                keyVariables: keyVariables.length > 0 ? keyVariables : undefined,
+                potentialIssues: issues.length > 0 ? issues : undefined
+            };
+            
+        } catch (err) {
+            console.error('Error parsing LLM insight:', err);
+            return {
+                explanation: response
+            };
+        }
+    }
+    /**
      * Generate explanation for anomalies during debugging
      */
     public async explainAnomaly(
@@ -749,6 +887,11 @@ Format your response as a JSON array of fix objects, each with these fields:
                 confidence: 0
             }];
         }
+    }
+    
+    public async setProjectContext(contextFiles: Map<string, string>): Promise<void> {
+        this.projectContext = new Map(contextFiles);
+        console.log(`Project context set with ${contextFiles.size} files`);
     }
     
     /**

@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { BreakpointManager, IntelligentBreakpoint } from './breakpointManager';
 import { DataCollector } from './dataCollector';
 import { ConversationalPrompts } from './conversationalPrompts';
@@ -6,6 +8,8 @@ import { InformationGainAnalyzer } from './informationGain';
 import { CausalAnalysis, RootCause } from './causalAnalysis';
 import { LLMService } from './llmService';
 import { BreakpointsProvider, RootCauseProvider, FixSuggestionsProvider, DebugInsightsProvider } from './treeDataProviders';
+import { CodeAnalyzer } from './codeAnalyzer';
+
 
 export class DebuggerIntegration implements vscode.Disposable {
     private breakpointManager: BreakpointManager;
@@ -16,10 +20,15 @@ export class DebuggerIntegration implements vscode.Disposable {
     private infoGainAnalyzer: InformationGainAnalyzer;
     private causalAnalyzer: CausalAnalysis;
     private llmService: LLMService;
+    private codeAnalyzer: CodeAnalyzer;
     private breakpointsProvider?: BreakpointsProvider;
     private rootCauseProvider?: RootCauseProvider;
     private fixSuggestionsProvider?: FixSuggestionsProvider;
     private debugInsightsProvider?: DebugInsightsProvider;
+    
+    // Project-wide analysis support
+    private projectFiles: Map<string, string> = new Map();
+    private analyzedFiles: Set<string> = new Set();
 
     constructor(
         breakpointManager: BreakpointManager, 
@@ -34,6 +43,7 @@ export class DebuggerIntegration implements vscode.Disposable {
         this.promptManager = new ConversationalPrompts(undefined, this.llmService);
         this.infoGainAnalyzer = infoGainAnalyzer || new InformationGainAnalyzer(dataCollector);
         this.causalAnalyzer = causalAnalyzer || new CausalAnalysis(dataCollector, this.llmService);
+        this.codeAnalyzer = this.breakpointManager.getCodeAnalyzer();
     }
     
     public setTreeProviders(
@@ -117,7 +127,16 @@ export class DebuggerIntegration implements vscode.Disposable {
                             // Specifically look for stop events
                             if (message.type === 'event' && message.event === 'stopped') {
                                 console.log(`🔴 BREAKPOINT STOPPED: reason=${message.body?.reason}, threadId=${message.body?.threadId}`);
-                              
+                                
+                                // Add a notification so it's clearly visible
+                                const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+                                statusBarItem.text = `$(debug-breakpoint) Breakpoint: ${message.body?.reason || 'Hit'}`;
+                                statusBarItem.tooltip = "CoDebugger is analyzing this breakpoint";
+                                statusBarItem.show();
+
+                                // Hide after 3 seconds
+                                setTimeout(() => statusBarItem.hide(), 3000);
+                                
                                 try {
                                     await this.handleBreakpointHit(trackerSession, message);
                                 } catch (error) {
@@ -157,9 +176,11 @@ export class DebuggerIntegration implements vscode.Disposable {
             'co-debugger-ai active: Run your code to start debugging.'
         );
     }
-    
     private async handleDebugSessionEnd(session: vscode.DebugSession): Promise<void> {
         console.log("Debug session ended, analyzing data...");
+        
+        // Clean up hover providers
+        this.clearBreakpointHovers();
         
         // Immediately update the breakpoints tree with what we have
         if (this.breakpointsProvider) {
@@ -176,10 +197,447 @@ export class DebuggerIntegration implements vscode.Disposable {
         
         console.log("Analysis complete, updating UI...");
         
-        // Manually trigger panel update
-        vscode.commands.executeCommand('intelligent-debugger.viewInsights');
+        // REMOVED: The following code that was creating and showing the debug insights panel
+        // const { DebugInsightsPanel } = require('./views/debugInsightsPanel');
+        // DebugInsightsPanel.createOrShow(vscode.extensions.getExtension('your-extension-id')?.extensionUri || vscode.Uri.file(''), false);
+        // const insightsHTML = await this.generateDebugInsightsHTML();
+        // DebugInsightsPanel.updateContent(insightsHTML);
+        
+        // Optional: Show a status bar notification that insights are available
+        const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+        statusBar.text = "$(info) Debug insights available";
+        statusBar.tooltip = "Click to view debug insights";
+        statusBar.command = 'intelligent-debugger.viewInsights'; // This command should be registered elsewhere to show the panel
+        statusBar.show();
+        
+        // Hide the notification after 10 seconds
+        setTimeout(() => statusBar.dispose(), 10000);
+    }
+
+  /**
+ * Generate meaningful debug insights using LLM
+ */
+private async generateDebugInsightsHTML(): Promise<string> {
+    const allSeries = this.dataCollector.getAllDataSeries();
+    
+    // If no data, show simple message
+    if (allSeries.length === 0 || !allSeries.some(s => s.data.length > 0)) {
+        return `<!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Debug Insights</title>
+                <style>
+                    body {
+                        font-family: var(--vscode-font-family);
+                        padding: 20px;
+                    }
+                    h1 {
+                        color: var(--vscode-editor-foreground);
+                    }
+                </style>
+            </head>
+            <body>
+                <h1>Debug Insights</h1>
+                <p>No debug data was collected during this session. Try setting breakpoints in key areas of your code.</p>
+            </body>
+            </html>`;
     }
     
+    // Start building enhanced HTML content with better styling
+    let insightsContent = `<!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Debug Insights</title>
+            <style>
+                body {
+                    font-family: var(--vscode-font-family);
+                    padding: 20px;
+                    line-height: 1.5;
+                }
+                h1, h2, h3 {
+                    color: var(--vscode-editor-foreground);
+                }
+                .insight-card {
+                    margin-bottom: 20px;
+                    padding: 16px;
+                    border: 1px solid var(--vscode-panel-border);
+                    border-radius: 6px;
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                }
+                .location-tag {
+                    font-size: 12px;
+                    background: var(--vscode-badge-background);
+                    color: var(--vscode-badge-foreground);
+                    padding: 3px 8px;
+                    border-radius: 20px;
+                    display: inline-block;
+                    margin-bottom: 10px;
+                }
+                .insight-explanation {
+                    background-color: var(--vscode-editor-inactiveSelectionBackground);
+                    padding: 12px;
+                    border-radius: 4px;
+                    margin: 10px 0;
+                }
+                .code-block {
+                    font-family: monospace;
+                    background-color: var(--vscode-editor-background);
+                    padding: 8px 12px;
+                    border-radius: 4px;
+                    overflow-x: auto;
+                }
+                .anomaly-badge {
+                    background-color: var(--vscode-errorForeground);
+                    color: white;
+                    padding: 3px 8px;
+                    border-radius: 20px;
+                    font-size: 12px;
+                    font-weight: bold;
+                    display: inline-block;
+                    margin-left: 8px;
+                }
+                .variable-list {
+                    display: none;
+                }
+                .toggle-button {
+                    background: var(--vscode-button-background);
+                    color: var(--vscode-button-foreground);
+                    border: none;
+                    padding: 4px 10px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    margin-top: 10px;
+                    font-size: 12px;
+                }
+                .toggle-button:hover {
+                    background: var(--vscode-button-hoverBackground);
+                }
+                .variable-name {
+                    color: var(--vscode-symbolIcon-variableForeground);
+                    font-weight: bold;
+                }
+                .variable-value {
+                    font-family: monospace;
+                    padding: 2px 4px;
+                    background-color: var(--vscode-editor-background);
+                    border-radius: 3px;
+                }
+                .variable-value-complex {
+                    white-space: pre;
+                    overflow-x: auto;
+                    max-height: 200px;
+                    overflow-y: auto;
+                    padding: 8px;
+                    background-color: var(--vscode-editor-background);
+                    border-radius: 3px;
+                    margin: 5px 0;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Debug Insights</h1>
+            <p>AI-enhanced understanding of your debugging session:</p>
+    `;
+    
+    try {
+        // Generate LLM insights for each significant breakpoint
+        let insightCards = '';
+        let insightPromises = [];
+        
+        for (const series of allSeries) {
+            if (series.data.length === 0) continue;
+            
+            // Get the most recent data point
+            const lastPoint = series.data[series.data.length - 1];
+            
+            // Skip if there are no variables
+            if (!lastPoint.variables || lastPoint.variables.length === 0) continue;
+            
+            // Prepare context for LLM
+            const breakpointInfo = this.findBreakpointById(series.breakpointId);
+            if (!breakpointInfo) continue;
+            
+            const fileName = breakpointInfo.uri.fsPath.split('/').pop() || 'unknown';
+            const lineNumber = breakpointInfo.line + 1;
+            
+            // Get the code snippet if available
+            let codeSnippet = '';
+            try {
+                const document = await vscode.workspace.openTextDocument(breakpointInfo.uri);
+                // Get a few lines before and after
+                const startLine = Math.max(0, breakpointInfo.line - 3);
+                const endLine = Math.min(document.lineCount - 1, breakpointInfo.line + 3);
+                
+                for (let i = startLine; i <= endLine; i++) {
+                    const lineText = document.lineAt(i).text;
+                    if (i === breakpointInfo.line) {
+                        codeSnippet += `> ${lineText}\n`; // Highlight the breakpoint line
+                    } else {
+                        codeSnippet += `  ${lineText}\n`;
+                    }
+                }
+            } catch (err) {
+                // If we can't access the file, just continue
+                codeSnippet = "Code not available";
+            }
+            
+            // Format variables for the LLM - IMPROVED FORMAT
+            const formattedVariables = this.formatVariablesForDisplay(lastPoint.variables);
+            
+            // Create a promise for this LLM insight
+            const insightPromise = this.llmService.generateDebugInsight(
+                    fileName, 
+                    lineNumber, 
+                    codeSnippet, 
+                    formattedVariables.plainText, // Plain text for LLM
+                    lastPoint.callStack || []
+                )
+                .then(insight => {
+                    // Create the insight card HTML
+                    return `
+                    <div class="insight-card">
+                        <div class="location-tag">
+                            ${fileName}:${lineNumber}
+                        </div>
+                        
+                        ${lastPoint.anomalyScore && lastPoint.anomalyScore > 1.0 ? 
+                            `<span class="anomaly-badge">Anomaly Detected</span>` : ''}
+                            
+                        <h2>What's happening here</h2>
+                        
+                        <div class="insight-explanation">
+                            ${insight.explanation}
+                        </div>
+                        
+                        ${insight.keyVariables ? `
+                        <h3>Important Variables</h3>
+                        <ul>
+                            ${insight.keyVariables.map(v => `<li><span class="variable-name">${v.name}</span>: ${v.explanation}</li>`).join('')}
+                        </ul>` : ''}
+                        
+                        ${insight.potentialIssues ? `
+                        <h3>Potential Issues</h3>
+                        <ul>
+                            ${insight.potentialIssues.map(issue => `<li>${issue}</li>`).join('')}
+                        </ul>` : ''}
+                        
+                        <div class="code-block">
+                            <pre>${this.escapeHtml(codeSnippet)}</pre>
+                        </div>
+                        
+                        <button class="toggle-button" onclick="document.getElementById('vars-${series.breakpointId}').style.display = document.getElementById('vars-${series.breakpointId}').style.display === 'none' ? 'block' : 'none';">
+                            Show Current Variables
+                        </button>
+                        
+                        <div id="vars-${series.breakpointId}" class="variable-list">
+                            <h4>Current Variable Values:</h4>
+                            ${formattedVariables.html}
+                        </div>
+                    </div>`;
+                })
+                .catch(err => {
+                    console.error('Error generating insight:', err);
+                    // Fallback to direct variable display if the LLM fails
+                    return `
+                    <div class="insight-card">
+                        <div class="location-tag">
+                            ${fileName}:${lineNumber}
+                        </div>
+                        
+                        <h2>Variables at this breakpoint</h2>
+                        
+                        <p>Unable to generate AI insights. Here are the raw variables:</p>
+                        
+                        <div class="code-block">
+                            <pre>${this.escapeHtml(codeSnippet)}</pre>
+                        </div>
+                        
+                        ${formattedVariables.html}
+                    </div>`;
+                });
+                
+            insightPromises.push(insightPromise);
+        }
+        
+        // Wait for all LLM insights to complete
+        const insightResults = await Promise.all(insightPromises);
+        insightCards = insightResults.join('');
+        
+        // Add the insight cards to the HTML
+        insightsContent += insightCards;
+        
+        // If we didn't generate any insights, provide a fallback message
+        if (!insightCards) {
+            insightsContent += `
+                <div class="insight-card">
+                    <h2>No significant insights detected</h2>
+                    <p>Try setting breakpoints in more relevant parts of your code to get better insights.</p>
+                </div>`;
+        }
+        
+    } catch (error) {
+        // Handle errors gracefully
+        console.error('Error generating debug insights:', error);
+        insightsContent += `
+            <div class="insight-card">
+                <h2>Error generating insights</h2>
+                <p>There was a problem analyzing your debug data: ${error.message}</p>
+                <p>Try again or set breakpoints in different locations.</p>
+            </div>`;
+    }
+    
+    // Close HTML content
+    insightsContent += `
+        <script>
+            // Simple toggle function for raw variables
+            function toggleVariables(id) {
+                const elem = document.getElementById(id);
+                elem.style.display = elem.style.display === 'none' ? 'block' : 'none';
+            }
+        </script>
+        </body>
+        </html>`;
+    
+    return insightsContent;
+}
+
+/**
+ * Format variables for display in a user-friendly way
+ * Returns both HTML and plain text formats
+ */
+private formatVariablesForDisplay(variables: any[]): { html: string, plainText: string } {
+    if (!variables || variables.length === 0) {
+        return { 
+            html: '<div>No variables collected</div>', 
+            plainText: 'No variables collected' 
+        };
+    }
+    
+    let html = '<div>';
+    let plainText = '';
+    
+    // Filter out internal Node.js variables that aren't interesting for debugging
+    const filteredVariables = variables.filter(v => {
+        const name = v.name || '';
+        // Skip Node.js internals and module system variables that clutter the output
+        return !name.startsWith('_') && 
+               !['module', 'exports', 'require', 'Buffer', 'process', 'clearImmediate',
+                'clearInterval', 'clearTimeout', 'setImmediate', 'setInterval', 'setTimeout',
+                'global', 'console'].includes(name);
+    });
+    
+    // If we've filtered everything out, show a subset of the original
+    const varsToShow = filteredVariables.length > 0 ? filteredVariables : variables.slice(0, 5);
+    
+    for (const variable of varsToShow) {
+        const name = variable.name || 'unnamed';
+        let valueStr = '';
+        
+        // Format the value based on its type
+        if (variable.value === undefined || variable.value === null) {
+            valueStr = String(variable.value);
+        } else if (typeof variable.value === 'function') {
+            // For functions, just show a shortened signature
+            const funcStr = String(variable.value);
+            const firstLine = funcStr.split('\n')[0].trim();
+            const shortened = firstLine.length > 50 ? firstLine.substring(0, 50) + '...' : firstLine;
+            valueStr = shortened;
+        } else if (typeof variable.value === 'object') {
+            try {
+                // Try to pretty format objects
+                const stringified = JSON.stringify(variable.value, null, 2);
+                if (stringified === '{}') {
+                    valueStr = '{}'; // Empty object
+                } else if (stringified === '[]') {
+                    valueStr = '[]'; // Empty array
+                } else if (stringified !== undefined) {
+                    // If stringification worked, use it with proper formatting
+                    valueStr = stringified;
+                } else {
+                    // Fallback if stringification fails
+                    valueStr = this.safeToString(variable.value);
+                }
+            } catch (e) {
+                // If JSON stringification fails, use a simpler approach
+                valueStr = this.safeToString(variable.value);
+            }
+        } else {
+            // For primitives, use the value directly
+            valueStr = String(variable.value);
+        }
+        
+        // For HTML output
+        if (valueStr.length > 100 || valueStr.includes('\n')) {
+            // For complex values, use a pre block
+            html += `<div>
+                <span class="variable-name">${this.escapeHtml(name)}</span>
+                <pre class="variable-value-complex">${this.escapeHtml(valueStr)}</pre>
+            </div>`;
+        } else {
+            // For simple values
+            html += `<div>
+                <span class="variable-name">${this.escapeHtml(name)}</span>: 
+                <span class="variable-value">${this.escapeHtml(valueStr)}</span>
+            </div>`;
+        }
+        
+        // For plain text output (used for LLM)
+        plainText += `${name}: ${valueStr}\n`;
+    }
+    
+    html += '</div>';
+    return { html, plainText };
+}
+
+/**
+ * Safe toString implementation for values that might throw when stringified
+ */
+private safeToString(value: any): string {
+    try {
+        // For simple objects, try Object.entries
+        if (typeof value === 'object' && value !== null) {
+            const entries = Object.entries(value);
+            if (entries.length === 0) return '{}';
+            
+            const props = entries.map(([k, v]) => {
+                // Handle nested values safely
+                let valueStr = typeof v === 'object' && v !== null ? '[Object]' : String(v);
+                // Truncate long strings
+                if (typeof valueStr === 'string' && valueStr.length > 50) {
+                    valueStr = valueStr.substring(0, 50) + '...';
+                }
+                return `${k}: ${valueStr}`;
+            });
+            
+            return `{ ${props.join(', ')} }`;
+        }
+        
+        // Handle arrays specially
+        if (Array.isArray(value)) {
+            if (value.length === 0) return '[]';
+            if (value.length > 5) {
+                return `[Array(${value.length})]`;
+            }
+            return `[${value.map(item => typeof item === 'object' ? '[Object]' : String(item)).join(', ')}]`;
+        }
+        
+        return String(value);
+    } catch (e) {
+        return `[Object (toString failed)]`;
+    }
+}
+    /**
+     * Find a breakpoint by its ID
+     */
+    private findBreakpointById(id: string): IntelligentBreakpoint | undefined {
+        return this.breakpointManager.getBreakpointById(id);
+    }
+
+            
     private async handleBreakpointsChange(event: vscode.BreakpointsChangeEvent): Promise<void> {
         // Handle manually added/removed breakpoints
         // We could integrate user-added breakpoints into our analysis
@@ -203,6 +661,10 @@ export class DebuggerIntegration implements vscode.Disposable {
                 const response = await session.customRequest('stackTrace', { threadId });
                 stackFrames = response.stackFrames || [];
                 console.log("Stack frames count:", stackFrames.length);
+                
+                // Analyze any files in the current call stack that haven't been analyzed yet
+                await this.analyzeCallStackFiles(stackFrames);
+                
             } catch (stackError) {
                 console.error("Error getting stack frames:", stackError);
                 // Create a minimal frame if needed
@@ -294,6 +756,160 @@ export class DebuggerIntegration implements vscode.Disposable {
         } catch (error) {
             console.error('Error handling breakpoint hit:', error);
         }
+    }
+    
+    /**
+     * Analyze files in the current call stack that haven't been analyzed yet
+     */
+    private async analyzeCallStackFiles(stackFrames: any[]): Promise<void> {
+        for (const frame of stackFrames) {
+            if (frame.source?.path && !this.analyzedFiles.has(frame.source.path)) {
+                try {
+                    console.log(`Analyzing new file in call stack: ${frame.source.path}`);
+                    const fileContent = await fs.readFile(frame.source.path, 'utf8');
+                    await this.codeAnalyzer.analyzeCode(fileContent, frame.source.path);
+                    this.analyzedFiles.add(frame.source.path);
+                    this.projectFiles.set(frame.source.path, fileContent);
+
+                    // Find related files through imports/requires
+                    await this.discoverRelatedFiles(frame.source.path, fileContent);
+                } catch (error) {
+                    console.log(`Could not analyze file in call stack: ${frame.source.path}`);
+                }
+            }
+        }
+    }
+
+    /**
+     * Discover related files through imports/requires
+     */
+    private async discoverRelatedFiles(filePath: string, content: string): Promise<void> {
+        try {
+            // Match different import patterns (customize based on language)
+            const importRegex = /import\s+.*?from\s+['"](.+?)['"]/g;
+            const requireRegex = /require\s*\(\s*['"](.+?)['"]\s*\)/g;
+            
+            const dependencies = [];
+            let match;
+            
+            // Find imports
+            while ((match = importRegex.exec(content)) !== null) {
+                dependencies.push(this.resolveImportPath(filePath, match[1]));
+            }
+            
+            // Find requires
+            while ((match = requireRegex.exec(content)) !== null) {
+                dependencies.push(this.resolveImportPath(filePath, match[1]));
+            }
+            
+            // Process discovered files (up to 3 levels deep to avoid too much processing)
+            for (const depPath of dependencies) {
+                if (!depPath || this.analyzedFiles.has(depPath) || !depPath.endsWith('.js') && !depPath.endsWith('.ts')) {
+                    continue;
+                }
+                
+                try {
+                    // Only analyze files that exist and are JavaScript/TypeScript
+                    const stats = await fs.stat(depPath);
+                    if (stats.isFile()) {
+                        console.log(`Analyzing related file: ${depPath}`);
+                        const depContent = await fs.readFile(depPath, 'utf8');
+                        await this.codeAnalyzer.analyzeCode(depContent, depPath);
+                        this.analyzedFiles.add(depPath);
+                        this.projectFiles.set(depPath, depContent);
+                    }
+                } catch (error) {
+                    // Skip files that don't exist or can't be accessed
+                }
+            }
+        } catch (error) {
+            console.error(`Error discovering related files for ${filePath}:`, error);
+        }
+    }
+
+    /**
+     * Resolve import path to absolute path
+     */
+    private resolveImportPath(sourceFile: string, importPath: string): string | null {
+        // Handle built-in modules
+        if (!importPath.startsWith('.') && !importPath.startsWith('/')) {
+            return null; // Skip built-in modules
+        }
+        
+        try {
+            // Convert relative path to absolute
+            const basePath = path.dirname(sourceFile);
+            const resolvedPath = path.resolve(basePath, importPath);
+            
+            // Try to resolve with common extensions if no extension specified
+            if (!path.extname(resolvedPath)) {
+                for (const ext of ['.js', '.ts', '.jsx', '.tsx']) {
+                    const pathWithExt = `${resolvedPath}${ext}`;
+                    try {
+                        if (fs.stat(pathWithExt)) {
+                            return pathWithExt;
+                        }
+                    } catch {
+                        // File doesn't exist with this extension, try next
+                    }
+                }
+                
+                // Check if it's a directory with an index file
+                for (const indexFile of ['index.js', 'index.ts', 'index.jsx', 'index.tsx']) {
+                    const indexPath = path.join(resolvedPath, indexFile);
+                    try {
+                        if (fs.stat(indexPath)) {
+                            return indexPath;
+                        } 
+                    } catch {
+                        // Index file doesn't exist, try next
+                    }
+                }
+            }
+            
+            return resolvedPath;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Get project context for a file
+     */
+    public getProjectContext(filePath: string): Map<string, string> {
+        const context = new Map<string, string>();
+        
+        // Add up to 3 most relevant files from the project context
+        let count = 0;
+        for (const [path, content] of this.projectFiles) {
+            if (count >= 3 || path === filePath) continue;
+            
+            // Prioritize files that are imported by or import the current file
+            const fileContent = this.projectFiles.get(filePath) || '';
+            const importedByCurrentFile = 
+                new RegExp(`from\\s+['"](.*${path.split('/').pop()})['"']`, 'g').test(fileContent) ||
+                new RegExp(`require\\s*\\(\\s*['"](.*${path.split('/').pop()})['"']\\s*\\)`, 'g').test(fileContent);
+                
+            const importsCurrentFile = 
+                new RegExp(`from\\s+['"](.*${filePath.split('/').pop()})['"']`, 'g').test(content) ||
+                new RegExp(`require\\s*\\(\\s*['"](.*${filePath.split('/').pop()})['"']\\s*\\)`, 'g').test(content);
+                
+            if (importedByCurrentFile || importsCurrentFile) {
+                context.set(path, content);
+                count++;
+            }
+        }
+        
+        // If we didn't fill our quota with directly related files, add other files
+        if (count < 3) {
+            for (const [path, content] of this.projectFiles) {
+                if (count >= 3 || path === filePath || context.has(path)) continue;
+                context.set(path, content);
+                count++;
+            }
+        }
+        
+        return context;
     }
     
     // 🆕 New helper method for getting variables through evaluation
@@ -427,43 +1043,43 @@ export class DebuggerIntegration implements vscode.Disposable {
     }
     
     /**
- * Comprehensive variable filtering function 
- */
-private filterOutNodeInternals(variables: Record<string, any>): Record<string, any> {
-    const result: Record<string, any> = {};
-    
-    // Extensive list of Node.js built-ins to filter out
-    const builtins = [
-        'Buffer', 'process', 'global', 'console', 'module', 'require', 'exports',
-        '__dirname', '__filename', 'globalThis', 'clearImmediate', 'clearInterval', 
-        'clearTimeout', 'setImmediate', 'setInterval', 'setTimeout',
-        'queueMicrotask', 'AbortController', 'AbortSignal', 'atob', 'btoa',
-        'Blob', 'crypto', 'fetch', 'BroadcastChannel', 'ByteLengthQueuingStrategy',
-        'CompressionStream', 'CountQueuingStrategy', 'Crypto'
-    ];
-    
-    // Filter out built-ins and system variables
-    for (const [key, value] of Object.entries(variables)) {
-        // Skip if it's in our list or starts with special characters
-        if (builtins.includes(key) || key.startsWith('__') || key === 'this') {
-            continue;
+     * Comprehensive variable filtering function 
+     */
+    private filterOutNodeInternals(variables: Record<string, any>): Record<string, any> {
+        const result: Record<string, any> = {};
+        
+        // Extensive list of Node.js built-ins to filter out
+        const builtins = [
+            'Buffer', 'process', 'global', 'console', 'module', 'require', 'exports',
+            '__dirname', '__filename', 'globalThis', 'clearImmediate', 'clearInterval', 
+            'clearTimeout', 'setImmediate', 'setInterval', 'setTimeout',
+            'queueMicrotask', 'AbortController', 'AbortSignal', 'atob', 'btoa',
+            'Blob', 'crypto', 'fetch', 'BroadcastChannel', 'ByteLengthQueuingStrategy',
+            'CompressionStream', 'CountQueuingStrategy', 'Crypto'
+        ];
+        
+        // Filter out built-ins and system variables
+        for (const [key, value] of Object.entries(variables)) {
+            // Skip if it's in our list or starts with special characters
+            if (builtins.includes(key) || key.startsWith('__') || key === 'this') {
+                continue;
+            }
+            
+            // Skip functions with certain patterns that suggest Node.js internals
+            if (typeof value === 'string' && 
+                value.startsWith('f ') && 
+                (value.includes('mod ??= require(id)') || 
+                value.includes('lazyLoadedValue'))) {
+                continue;
+            }
+            
+            // Keep this variable
+            result[key] = value;
         }
         
-        // Skip functions with certain patterns that suggest Node.js internals
-        if (typeof value === 'string' && 
-            value.startsWith('f ') && 
-            (value.includes('mod ??= require(id)') || 
-             value.includes('lazyLoadedValue'))) {
-            continue;
-        }
-        
-        // Keep this variable
-        result[key] = value;
+        console.log(`DEBUG: Filtered ${Object.keys(variables).length} variables down to ${Object.keys(result).length}`);
+        return result;
     }
-    
-    console.log(`DEBUG: Filtered ${Object.keys(variables).length} variables down to ${Object.keys(result).length}`);
-    return result;
-}
     
     /**
      * Find the most informative variables in the current context
@@ -975,7 +1591,7 @@ private filterOutNodeInternals(variables: Record<string, any>): Record<string, a
                     }
                 }
                 const staticIssues = this.breakpointManager.getStaticAnalysisIssues();
-                                    console.log("Static analysis issues:", staticIssues);
+                console.log("Static analysis issues:", staticIssues);
                                   
                 // Update fix suggestions even if we don't have root causes
                 if (this.fixSuggestionsProvider) {
@@ -1304,8 +1920,7 @@ function findMax(numbers) {
                 message += `Most likely cause: ${item.explanation.possibleCauses[0]}\n\n`;
             }
         }
-        
-        // Show the message
+                // Show the message
         vscode.window.showInformationMessage(message, { modal: false });
     }
     
@@ -1324,16 +1939,18 @@ function findMax(numbers) {
             })));
         }
     }
-    
+    /**
+     * Sets a VS Code breakpoint with hover information but no visual decoration
+     */
     private async setVSCodeBreakpoint(bp: IntelligentBreakpoint): Promise<void> {
-        // Create a VS Code breakpoint with improved logging
         try {
+            // Create a VS Code location object
             const location = new vscode.Location(
                 bp.uri,
                 new vscode.Position(bp.line, bp.column)
             );
             
-            // Create a simple breakpoint - avoid conditions for now to debug the core functionality
+            // Create a standard VS Code breakpoint
             const vscodeBreakpoint = new vscode.SourceBreakpoint(
                 location,
                 true, // enabled
@@ -1342,58 +1959,283 @@ function findMax(numbers) {
                 bp.id // id
             );
             
-            // Store the breakpoint
+            // Store the breakpoint in our tracking map
             this.activeBreakpoints.set(bp.id, vscodeBreakpoint);
             
-            // Check if VS Code already has this breakpoint
+            // Check if VS Code already has this breakpoint to avoid duplicates
             const existingBreakpoints = vscode.debug.breakpoints.filter(existingBp => {
                 if (existingBp instanceof vscode.SourceBreakpoint) {
                     return existingBp.location.uri.toString() === bp.uri.toString() && 
-                           existingBp.location.range.start.line === bp.line;
+                        existingBp.location.range.start.line === bp.line;
                 }
                 return false;
             });
             
-            if (existingBreakpoints.length > 0) {
-                console.log(`Breakpoint at ${bp.uri.fsPath}:${bp.line + 1} already exists, reusing`);
-            } else {
-                // Add the breakpoint to VS Code
+            // Only add if not already present
+            if (existingBreakpoints.length === 0) {
                 console.log(`Adding new breakpoint at ${bp.uri.fsPath}:${bp.line + 1}`);
                 vscode.debug.addBreakpoints([vscodeBreakpoint]);
+            } else {
+                console.log(`Breakpoint at ${bp.uri.fsPath}:${bp.line + 1} already exists, enhancing with hover`);
             }
             
-            // Add a decoration to show this is an intelligent breakpoint
-            const editor = vscode.window.visibleTextEditors.find(e => 
-                e.document.uri.toString() === bp.uri.toString()
+            // Generate a unique identifier for this breakpoint's hover provider
+            const hoverProviderId = `hover-${bp.id}`;
+            
+            // Check if we already have a hover provider for this file
+            const existingHoverProvider = this.disposables.find(d => 
+                (d as any)._id === hoverProviderId
             );
             
-            if (editor) {
-                const decorationType = vscode.window.createTextEditorDecorationType({
-                    isWholeLine: true,
-                    gutterIconPath: this.getBreakpointIconPath(),
-                    gutterIconSize: 'contain',
-                    backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
-                    overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.findMatchForeground')
-                });
-                
-                const range = new vscode.Range(
-                    new vscode.Position(bp.line, 0),
-                    new vscode.Position(bp.line, 0)
-                );
-                
-                editor.setDecorations(decorationType, [range]);
-                console.log(`Decoration set for breakpoint at ${bp.uri.fsPath}:${bp.line + 1}`);
+            if (existingHoverProvider) {
+                // Remove existing hover provider to avoid duplicates
+                existingHoverProvider.dispose();
+                this.disposables = this.disposables.filter(d => d !== existingHoverProvider);
             }
+            
+            // Register a hover provider to show information when hovering over this line
+            const hoverDisposable = vscode.languages.registerHoverProvider({ 
+                scheme: 'file', 
+                pattern: bp.uri.fsPath 
+            }, {
+                provideHover: async (document, position, token) => {
+                    // Only show hover info if hovering on the exact breakpoint line
+                    if (position.line === bp.line) {
+                        // Create rich markdown content for the hover
+                        const markdown = new vscode.MarkdownString();
+                        markdown.isTrusted = true;
+                        
+                        // Add a header with indicator that this is an intelligent breakpoint
+                        markdown.appendMarkdown(`### $(debug-breakpoint) Intelligent Breakpoint\n\n`);
+                        
+                        // Show the reason this breakpoint was placed
+                        if (bp.reason) {
+                            markdown.appendMarkdown(`**Why:** ${bp.reason}\n\n`);
+                        }
+                        
+                        // Generate explanations when hovered - this makes the hover powerful
+                        try {
+                            // Get surrounding code for context
+                            const startLine = Math.max(0, bp.line - 2);
+                            const endLine = Math.min(document.lineCount - 1, bp.line + 2);
+                            let codeSnippet = '';
+                            
+                            for (let i = startLine; i <= endLine; i++) {
+                                const lineText = document.lineAt(i).text;
+                                if (i === bp.line) {
+                                    codeSnippet += `> ${lineText}\n`; // Highlight the breakpoint line
+                                } else {
+                                    codeSnippet += `  ${lineText}\n`;
+                                }
+                            }
+                            
+                            // Use getAllDataSeries() and find the one for this breakpoint ID
+                            const allSeries = this.dataCollector.getAllDataSeries();
+                            const seriesForBreakpoint = allSeries.find(series => series.breakpointId === bp.id);
+                            
+                            // If we have real-time data for this breakpoint, offer insights
+                            if (seriesForBreakpoint && seriesForBreakpoint.data && seriesForBreakpoint.data.length > 0) {
+                                const latestPoint = seriesForBreakpoint.data[seriesForBreakpoint.data.length - 1];
+                                
+                                if (latestPoint.variables && latestPoint.variables.length > 0) {
+                                    // Format variables
+                                    const variables = latestPoint.variables.map(v => `${v.name}: ${v.value}`).join('\n');
+                                    
+                                    // Get AI insights about these variables
+                                    try {
+                                        const insight = await this.llmService.generateDebugInsight(
+                                            document.fileName.split('/').pop() || document.fileName,
+                                            bp.line + 1,
+                                            codeSnippet,
+                                            variables,
+                                            latestPoint.callStack || []
+                                        );
+                                        
+                                        // Add AI explanation
+                                        markdown.appendMarkdown(`**Context:** ${insight.explanation}\n\n`);
+                                        
+                                        // Add key variables with explanations
+                                        if (insight.keyVariables && insight.keyVariables.length > 0) {
+                                            markdown.appendMarkdown(`**Key Variables:**\n`);
+                                            for (const variable of insight.keyVariables) {
+                                                markdown.appendMarkdown(`- \`${variable.name}\`: ${variable.explanation}\n`);
+                                            }
+                                            markdown.appendMarkdown(`\n`);
+                                        }
+                                        
+                                        // Add potential issues
+                                        if (insight.potentialIssues && insight.potentialIssues.length > 0) {
+                                            markdown.appendMarkdown(`**Potential Issues:**\n`);
+                                            for (const issue of insight.potentialIssues) {
+                                                markdown.appendMarkdown(`- ${issue}\n`);
+                                            }
+                                            markdown.appendMarkdown(`\n`);
+                                        }
+                                    } catch (error) {
+                                        console.error('Error getting insight for hover:', error);
+                                        
+                                        // Fall back to showing just the variables
+                                        markdown.appendMarkdown(`**Current Variable Values:**\n`);
+                                        for (const v of latestPoint.variables.slice(0, 5)) { // Limit to 5
+                                            markdown.appendMarkdown(`- \`${v.name}\` = ${v.value}\n`);
+                                        }
+                                        markdown.appendMarkdown(`\n`);
+                                    }
+                                    
+                                    // Show if there was an anomaly
+                                    if (latestPoint.anomalyScore && latestPoint.anomalyScore > 1.0) {
+                                        markdown.appendMarkdown(`⚠️ **Anomaly detected** (Score: ${latestPoint.anomalyScore.toFixed(2)})\n\n`);
+                                    }
+                                } else {
+                                    markdown.appendMarkdown(`*No variables collected at this breakpoint yet.*\n\n`);
+                                }
+                            } else {
+                                // Show key variables that should be watched (from static analysis)
+                                if (bp.variables && bp.variables.length > 0) {
+                                    markdown.appendMarkdown(`**Key Variables to Watch:**\n`);
+                                    for (const variable of bp.variables) {
+                                        markdown.appendMarkdown(`- \`${variable}\`\n`);
+                                    }
+                                    markdown.appendMarkdown(`\n`);
+                                }
+                            }
+                            
+                            // Show AI insights about this breakpoint if available
+                            if (bp.llmInsights && bp.llmInsights.length > 0) {
+                                markdown.appendMarkdown(`**AI Insights:**\n`);
+                                for (const insight of bp.llmInsights) {
+                                    markdown.appendMarkdown(`- ${insight}\n`);
+                                }
+                            }
+                        } catch (error) {
+                            console.error('Error generating hover content:', error);
+                            markdown.appendMarkdown(`*Error generating insights: ${error.message}*\n\n`);
+                        }
+                        
+                        // Add score information at the bottom
+                        markdown.appendMarkdown(`\n---\n`);
+                        markdown.appendMarkdown(`Priority Score: ${bp.score.toFixed(2)}\n`);
+                        
+                        return new vscode.Hover(markdown);
+                    }
+                    return null;
+                }
+            });
+            
+            // Store an ID on the disposable to identify it later
+            (hoverDisposable as any)._id = hoverProviderId;
+            
+            // Add to disposables for cleanup
+            this.disposables.push(hoverDisposable);
+            
+            // Optionally add a status bar notification
+            const statusBarItem = vscode.window.createStatusBarItem(
+                vscode.StatusBarAlignment.Right,
+                100
+            );
+            
+            statusBarItem.text = `$(debug-breakpoint) Intelligent breakpoint set at line ${bp.line + 1}`;
+            statusBarItem.tooltip = bp.reason;
+            statusBarItem.show();
+            
+            // Hide the status bar notification after 3 seconds
+            setTimeout(() => {
+                statusBarItem.hide();
+                statusBarItem.dispose();
+            }, 3000);
+            
         } catch (error) {
-            console.error(`Error setting breakpoint at ${bp.uri.fsPath}:${bp.line + 1}:`, error);
+            console.error(`Error setting breakpoint with hover at ${bp.uri.fsPath}:${bp.line + 1}:`, error);
         }
     }
+/**
+ * Cleanup method to dispose of all hover providers when needed
+ * Call this when a debug session ends
+ */
+public clearBreakpointHovers(): void {
+    // Find and dispose all hover providers
+    const hoverProviders = this.disposables.filter(d => 
+        (d as any)._id && (d as any)._id.startsWith('hover-')
+    );
     
+    for (const provider of hoverProviders) {
+        provider.dispose();
+    }
+    
+    // Remove them from our disposables list
+    this.disposables = this.disposables.filter(d => 
+        !((d as any)._id && (d as any)._id.startsWith('hover-'))
+    );
+}     
     // Helper method to get breakpoint icon
     private getBreakpointIconPath(): vscode.Uri {
         // You can create a custom icon in your extension resources folder
         // Or use a built-in codicon
         return vscode.Uri.parse('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iOCIgZmlsbD0iI0YxNDg3QiIvPjwvc3ZnPg==');
+    }
+
+    /**
+     * Update the LLM service with project context for current file
+     * This ensures AI models have access to related files
+     */
+    public async provideProjectContext(filePath: string, llmService: LLMService): Promise<void> {
+        if (!filePath) return;
+        
+        try {
+            // Get project context for this file
+            const relatedFiles = this.getProjectContext(filePath);
+            
+            // Format the context for the LLM
+            if (relatedFiles.size > 0) {
+                const context = new Map<string, string>();
+                
+                for (const [path, content] of relatedFiles.entries()) {
+                    // Get a simplified version of the content for context
+                    const simplifiedContent = this.getSimplifiedFileContent(content, path);
+                    context.set(path.split('/').pop() || path, simplifiedContent);
+                }
+                
+                // Update the LLM service with this context
+                await llmService.setProjectContext(context);
+                console.log(`Updated LLM with context from ${context.size} related files`);
+            }
+        } catch (error) {
+            console.error('Error providing project context:', error);
+        }
+    }
+    
+    /**
+     * Get a simplified version of file content (focusing on signatures and structure)
+     */
+    private getSimplifiedFileContent(content: string, filePath: string): string {
+        // For large files, extract just the important parts
+        if (content.length > 5000) {
+            // Extract function/class definitions
+            const lines = content.split('\n');
+            const importLines: string[] = [];
+            const signatureLines: string[] = [];
+            
+            // Extract imports and function/class signatures
+            for (const line of lines) {
+                if (line.includes('import ') || line.includes('require(')) {
+                    importLines.push(line);
+                } else if (
+                    line.includes('function ') || 
+                    line.includes('class ') ||
+                    line.includes(' => {') ||
+                    line.match(/\w+\s*\([^)]*\)\s*{/) // Function with parameters
+                ) {
+                    signatureLines.push(line);
+                }
+            }
+            
+            return `// Simplified content from ${filePath.split('/').pop()}\n` +
+                importLines.join('\n') + '\n\n' +
+                '// Function and class signatures:\n' +
+                signatureLines.join('\n');
+        }
+        
+        return content;
     }
     
     public dispose(): void {

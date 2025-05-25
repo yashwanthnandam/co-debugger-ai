@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { LLMService, LLMAnalysisResult } from './llmService';
 
 // Define node types for our code flow graph
@@ -55,6 +57,11 @@ export class CodeAnalyzer {
     private llmAnalysisResult: LLMAnalysisResult | null = null;
     private codeSnippets: Map<string, string> = new Map(); // Store code snippets for nodes
     
+    // Track analyzed files and their dependencies
+    private analyzedFiles: Set<string> = new Set();
+    private fileDependencies: Map<string, string[]> = new Map();
+    private fileContents: Map<string, string> = new Map();
+    
     constructor(llmService?: LLMService) {
         // Initialize with some example historical error data
         this.loadHistoricalErrorData();
@@ -71,7 +78,6 @@ export class CodeAnalyzer {
         ]);
     }
 
-    // Add this method to your CodeAnalyzer class
     public getLastAnalysisResult(): LLMAnalysisResult | null {
         return this.lastAnalysisResult;
     }
@@ -80,11 +86,106 @@ export class CodeAnalyzer {
         return this.llmAnalysisResult;
     }
     
+    /**
+     * Check if a file has already been analyzed
+     */
+    public isFileAnalyzed(filePath: string): boolean {
+        return this.analyzedFiles.has(filePath);
+    }
+
+    /**
+     * Get all analyzed file paths
+     */
+    public getAnalyzedFiles(): string[] {
+        return Array.from(this.analyzedFiles);
+    }
+
+    /**
+     * Get file dependencies for a given file
+     */
+    public getFileDependencies(filePath: string): string[] {
+        return this.fileDependencies.get(filePath) || [];
+    }
+
+    /**
+     * Get project-wide context for LLM analysis
+     */
+    public getProjectContext(filePath: string): Map<string, string> {
+        const context = new Map<string, string>();
+        
+        // Include immediate dependencies of the current file
+        const dependencies = this.getFileDependencies(filePath);
+        for (const dep of dependencies) {
+            const content = this.fileContents.get(dep);
+            if (content) {
+                context.set(dep, this.simplifyFileContent(content));
+            }
+        }
+        
+        // If we still have room, include other analyzed files
+        if (context.size < 3) {
+            for (const [path, content] of this.fileContents.entries()) {
+                if (path !== filePath && !context.has(path) && context.size < 3) {
+                    context.set(path, this.simplifyFileContent(content));
+                }
+            }
+        }
+        
+        return context;
+    }
+
+    /**
+     * Simplify file content for context (reduce token usage)
+     */
+    private simplifyFileContent(content: string): string {
+        // For large files, extract just the key parts
+        if (content.length > 2000) {
+            const lines = content.split('\n');
+            const importLines = lines.filter(line => 
+                line.includes('import ') || line.includes('require(')
+            );
+            
+            // Extract function and class declarations
+            const functionLines = [];
+            for (const line of lines) {
+                if (line.match(/\bfunction\s+\w+/) || 
+                    line.match(/\bclass\s+\w+/) || 
+                    line.match(/\b\w+\s*=\s*\(\s*.*?\)\s*=>/) || 
+                    line.match(/\b\w+\s*\(\s*.*?\)\s*{/)) {
+                    functionLines.push(line);
+                }
+            }
+            
+            return [
+                '// Simplified file content',
+                ...importLines,
+                '',
+                '// Function and class definitions:',
+                ...functionLines
+            ].join('\n');
+        }
+        
+        return content;
+    }
+    
     public async analyzeCode(code: string, filename: string): Promise<void> {
         this.currentFile = filename;
-        this.nodes.clear();
-        this.edges = [];
-        this.codeSnippets.clear();
+        
+        // Store the file content
+        this.fileContents.set(filename, code);
+        
+        // If we've already analyzed this file, skip full analysis
+        if (this.analyzedFiles.has(filename)) {
+            console.log(`File ${filename} already analyzed, skipping`);
+            return;
+        }
+        
+        // Mark this file as analyzed
+        this.analyzedFiles.add(filename);
+        
+        // Clear nodes and edges related to this file
+        this.removeNodesForFile(filename);
+        
         const hasSyntaxIssues = this.hasSyntaxErrors(code);
 
         // if (hasSyntaxIssues) {
@@ -128,6 +229,10 @@ export class CodeAnalyzer {
         try {
             // First, get LLM insights about the code
             await this.performLLMAnalysis(code, filename);
+            
+            // Discover dependencies in this file
+            const dependencies = this.discoverDependencies(code, filename);
+            this.fileDependencies.set(filename, dependencies);
             
             // Parse using a more compatible approach
             let ast;
@@ -238,6 +343,122 @@ export class CodeAnalyzer {
                 `Failed to parse code: ${error.message}. Please open an issue with your code sample.`
             );
             throw error;
+        }
+    }
+    
+    /**
+     * Discover dependencies in the code
+     */
+    private discoverDependencies(code: string, currentFilePath: string): string[] {
+        const dependencies: string[] = [];
+        
+        try {
+            // Find imports
+            const importRegex = /import\s+.*?from\s+['"](.+?)['"]/g;
+            const requireRegex = /require\s*\(\s*['"](.+?)['"]\s*\)/g;
+            
+            let match;
+            
+            // Get imports
+            while ((match = importRegex.exec(code)) !== null) {
+                const importPath = match[1];
+                const resolvedPath = this.resolveImportPath(currentFilePath, importPath);
+                if (resolvedPath) {
+                    dependencies.push(resolvedPath);
+                }
+            }
+            
+            // Get requires
+            while ((match = requireRegex.exec(code)) !== null) {
+                const importPath = match[1];
+                const resolvedPath = this.resolveImportPath(currentFilePath, importPath);
+                if (resolvedPath) {
+                    dependencies.push(resolvedPath);
+                }
+            }
+        } catch (error) {
+            console.error('Error discovering dependencies:', error);
+        }
+        
+        return dependencies;
+    }
+    
+    /**
+     * Resolve import path to absolute file path
+     */
+    private resolveImportPath(sourcePath: string, importPath: string): string | null {
+        // Skip built-in modules and node_modules
+        if (!importPath.startsWith('.') && !importPath.startsWith('/')) {
+            return null;
+        }
+        
+        try {
+            const baseDir = path.dirname(sourcePath);
+            let fullPath = path.resolve(baseDir, importPath);
+            
+            // Try with extensions if none specified
+            if (!path.extname(fullPath)) {
+                for (const ext of ['.ts', '.js', '.tsx', '.jsx']) {
+                    const pathWithExt = fullPath + ext;
+                    try {
+                        // Check if file exists (async fs call wrapped in a try-catch)
+                        fs.stat(pathWithExt);
+                        return pathWithExt;
+                    } catch {
+                        // File doesn't exist with this extension, continue
+                    }
+                }
+                
+                // Check for index files in directory
+                for (const indexFile of ['index.ts', 'index.js', 'index.tsx', 'index.jsx']) {
+                    const indexPath = path.join(fullPath, indexFile);
+                    try {
+                        // Check if file exists
+                        fs.stat(indexPath);
+                        return indexPath;
+                    } catch {
+                        // Index file doesn't exist, continue
+                    }
+                }
+            }
+            
+            // Return the original path if we couldn't resolve with extensions
+            return fullPath;
+        } catch (error) {
+            console.error('Error resolving import path:', error);
+            return null;
+        }
+    }
+    
+    /**
+     * Remove nodes related to a specific file
+     */
+    private removeNodesForFile(filename: string): void {
+        // Get all node IDs for this file
+        const nodeIdsToRemove: string[] = [];
+        
+        for (const [id, node] of this.nodes.entries()) {
+            if (node.location.file === filename) {
+                nodeIdsToRemove.push(id);
+            }
+        }
+        
+        // Remove the nodes
+        for (const id of nodeIdsToRemove) {
+            this.nodes.delete(id);
+            this.codeSnippets.delete(id);
+        }
+        
+        // Update edges to remove any that reference removed nodes
+        this.edges = this.edges.filter(edge => 
+            !nodeIdsToRemove.includes(edge.from) && 
+            !nodeIdsToRemove.includes(edge.to)
+        );
+        
+        // Update incoming/outgoing references in remaining nodes
+        for (const node of this.nodes.values()) {
+            node.incoming = node.incoming.filter(id => !nodeIdsToRemove.includes(id));
+            node.outgoing = node.outgoing.filter(id => !nodeIdsToRemove.includes(id));
         }
     }
     
@@ -382,13 +603,32 @@ export class CodeAnalyzer {
     
     private async performLLMAnalysis(code: string, filename: string): Promise<void> {
         try {
-            // Get AI analysis of the code
-            this.llmAnalysisResult = await this.llmService.analyzeCodeWithLLM(code, filename);
-            console.log('LLM analysis complete');
+            // Get project context for improved analysis
+            const projectContext = this.getProjectContext(filename);
+            let contextString = '';
+            
+            if (projectContext.size > 0) {
+                contextString = "## Project Context:\n\n";
+                for (const [filePath, content] of projectContext.entries()) {
+                    contextString += `### ${path.basename(filePath)}:\n\`\`\`\n${content}\n\`\`\`\n\n`;
+                }
+            }
+            
+            // Get AI analysis of the code with project context
+            this.llmAnalysisResult = await this.llmService.analyzeCodeWithLLM(code, filename, contextString);
+            console.log('LLM analysis complete with project context');
         } catch (error) {
             console.error('Error performing LLM analysis:', error);
-            // Continue without LLM insights if it fails
-            this.llmAnalysisResult = null;
+            
+            // Try again without project context if it fails
+            try {
+                this.llmAnalysisResult = await this.llmService.analyzeCodeWithLLM(code, filename);
+                console.log('LLM analysis complete without project context');
+            } catch (error) {
+                console.error('Error performing LLM analysis (second attempt):', error);
+                // Continue without LLM insights if it fails
+                this.llmAnalysisResult = null;
+            }
         }
     }
     
@@ -403,7 +643,7 @@ export class CodeAnalyzer {
                 enter: (node: any, parent: any) => {
                     // Focus on significant nodes that would be valuable debugging points
                     if (this.isSignificantNode(node)) {
-                        const id = `node_${nodeId++}`;
+                        const id = `node_${filename}_${nodeId++}`;
                         
                         // Ensure node has location info
                         if (!node.loc) {
@@ -488,7 +728,7 @@ export class CodeAnalyzer {
             if (!node || !node.type) continue;
             
             if (this.isSignificantNode(node)) {
-                const id = `node_${nodeId++}`;
+                const id = `node_${filename}_${nodeId++}`;
                 
                 if (!node.loc) continue;
                 
@@ -552,7 +792,7 @@ export class CodeAnalyzer {
         
         // If this is a node with a type, check if it's significant
         if (ast.type && this.isSignificantNode(ast)) {
-            const id = `node_${nodeId++}`;
+            const id = `node_${filename}_${nodeId++}`;
             
             // Ensure node has location info
             if (!ast.loc) {

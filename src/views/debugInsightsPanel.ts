@@ -11,32 +11,45 @@ export class DebugInsightsPanel {
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
     private _disposables: vscode.Disposable[] = [];
+    private _content: string = ''; // Store the content
 
-    public static createOrShow(extensionUri: vscode.Uri) {
+    public static createOrShow(extensionUri: vscode.Uri, showPanel: boolean = true) {
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
 
-        // If we already have a panel, show it.
+        // If we already have a panel, just update it and optionally show it
         if (DebugInsightsPanel.currentPanel) {
-            DebugInsightsPanel.currentPanel._panel.reveal(column);
-            return;
+            if (showPanel) {
+                DebugInsightsPanel.currentPanel._panel.reveal(column);
+            }
+            return DebugInsightsPanel.currentPanel;
         }
 
-        // Otherwise, create a new panel.
+        // Otherwise, create a new panel but only show it if showPanel is true
         const panel = vscode.window.createWebviewPanel(
             DebugInsightsPanel.viewType,
             'Debug Insights',
-            column || vscode.ViewColumn.One,
+            showPanel ? (column || vscode.ViewColumn.One) : { viewColumn: column || vscode.ViewColumn.One, preserveFocus: true },
             {
                 // Enable JavaScript in the webview
                 enableScripts: true,
                 // Restrict the webview to only loading content from our extension's directory
-                localResourceRoots: [extensionUri]
+                localResourceRoots: [extensionUri],
+                retainContextWhenHidden: true // Keep the panel loaded when hidden
             }
         );
 
         DebugInsightsPanel.currentPanel = new DebugInsightsPanel(panel, extensionUri);
+        // If showPanel is false, the panel will be created in the background (preserveFocus: true)
+        return DebugInsightsPanel.currentPanel;
+    }
+
+    public static updateContent(content: string | undefined) {
+        if (DebugInsightsPanel.currentPanel) {
+            DebugInsightsPanel.currentPanel._content = content || '';
+            DebugInsightsPanel.currentPanel._update();
+        }
     }
 
     private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
@@ -96,6 +109,12 @@ export class DebugInsightsPanel {
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
+        // If we have custom content, use it
+        if (this._content) {
+            return this._content;
+        }
+
+        // Otherwise use the default
         return `<!DOCTYPE html>
             <html lang="en">
             <head>

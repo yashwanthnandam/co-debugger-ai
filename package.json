@@ -7,8 +7,8 @@
     "publisher": "YashwanthNandam",
     "icon": "resources/debugger-icon.png",
     "repository": {
-      "type": "git",
-      "url": "https://github.com/yashwanthnandam/codebugger-ai"
+        "type": "git",
+        "url": "https://github.com/yashwanthnandam/codebugger-ai"
     },
     "engines": {
         "vscode": "^1.60.0"
@@ -16,18 +16,18 @@
     "categories": [
         "Debuggers",
         "Other"
-      ],
+    ],
     "galleryBanner": {
         "color": "#1e415e",
         "theme": "dark"
-      },
+    },
     "keywords": [
         "debugging",
         "ai",
         "breakpoints",
         "analysis",
         "javascript"
-      ],
+    ],
     "activationEvents": [
         "onCommand:intelligent-debugger.startAnalysis",
         "onDebug"
@@ -71,6 +71,12 @@
                 "title": "Ask About Any Variable",
                 "category": "Intelligent Debugger",
                 "icon": "$(question)"
+            },
+            {
+                "command": "intelligent-debugger.analyzeWorkspace",
+                "title": "Analyze Entire Project",
+                "category": "Intelligent Debugger",
+                "icon": "$(search)"
             }
         ],
         "menus": {
@@ -199,6 +205,7 @@
         "dotenv": "^16.5.0",
         "escodegen": "^2.1.0",
         "estraverse": "^5.3.0",
-        "openai": "^4.100.0"
+        "openai": "^4.100.0",
+        "vscode-debugprotocol": "^1.51.0"
     }
 }

@@ -179,6 +179,10 @@ export class BreakpointManager {
         
         return `Score: ${score.toFixed(2)} - ${reasons.join(", ")}`;
     }
+
+    public getCodeAnalyzer(): CodeAnalyzer {
+        return this.analyzer;
+    }
     
     public async getTopBreakpoints(limit?: number): Promise<IntelligentBreakpoint[]> {
         const config = vscode.workspace.getConfiguration('intelligentDebugger');
