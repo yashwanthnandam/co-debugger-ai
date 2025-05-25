@@ -27,6 +27,7 @@ yarn-error.log*
 *.njsproj
 *.sln
 *.sw?
-
+*.vsix
+*.DS_Store
 
 src/config.ts

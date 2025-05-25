@@ -394,125 +394,6 @@ export function activate(context: vscode.ExtensionContext) {
             }
         });
     });
-
-    // Enhanced test debug command with project context
-    let testDebugCmd = vscode.commands.registerCommand('intelligent-debugger.testDebug', async () => {
-        // Create a simple test file
-        const testCode = `
-    // Test file for debugging
-    function main() {
-        console.log("Debug test starting");
-        
-        // Test data to observe
-        const testArray = [5, 9, 3, 1, 7];
-        let max = testArray[0];
-        
-        // Loop with a breakpoint (line 10)
-        for (let i = 0; i < testArray.length; i++) {
-            if (testArray[i] > max) {
-                max = testArray[i];
-            }
-        }
-        
-        console.log("Max value:", max);
-    }
-    
-    main();
-    `;
-
-        // Create a helper test file to test project context
-        const helperTestCode = `
-    // Helper functions for debug testing
-    
-    /**
-     * Sorts and processes an array
-     */
-    export function processArray(arr) {
-        return arr.slice().sort((a, b) => a - b);
-    }
-    
-    /**
-     * Finds the maximum value in an array
-     */
-    export function findMax(numbers) {
-        if (!numbers || numbers.length === 0) return undefined;
-        
-        let max = numbers[0];
-        for (let i = 0; i < numbers.length; i++) {
-            if (numbers[i] > max) {
-                max = numbers[i];
-            }
-        }
-        
-        return max;
-    }
-    `;
-    
-        // Save to temp files
-        const tmpDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.tmpdir();
-        const testFilePath = path.join(tmpDir, 'debug-test.js');
-        const helperFilePath = path.join(tmpDir, 'helper-functions.js');
-        
-        fs.writeFileSync(testFilePath, testCode);
-        fs.writeFileSync(helperFilePath, helperTestCode);
-        
-        // Update main test to import helper
-        const updatedTestCode = `
-    // Test file for debugging
-    const { processArray, findMax } = require('./helper-functions');
-    
-    function main() {
-        console.log("Debug test starting");
-        
-        // Test data to observe
-        const testArray = [5, 9, 3, 1, 7];
-        let max = findMax(testArray);
-        
-        // Also test with processed array
-        const processed = processArray(testArray);
-        console.log("Processed array:", processed);
-        
-        console.log("Max value:", max);
-    }
-    
-    main();
-    `;
-        
-        fs.writeFileSync(testFilePath, updatedTestCode);
-        
-        // Open the main file
-        const doc = await vscode.workspace.openTextDocument(testFilePath);
-        const editor = await vscode.window.showTextDocument(doc);
-        
-        // Set a breakpoint in the main function
-        const breakpointPosition = new vscode.Position(6, 0);
-        const breakpoint = new vscode.SourceBreakpoint(
-            new vscode.Location(doc.uri, breakpointPosition),
-            true
-        );
-        
-        // Clear existing breakpoints and add the new one
-        vscode.debug.removeBreakpoints(vscode.debug.breakpoints);
-        vscode.debug.addBreakpoints([breakpoint]);
-        
-        // Create a launch config
-        const config = {
-            type: 'node',
-            request: 'launch',
-            name: 'Debug Test',
-            program: testFilePath,
-            skipFiles: ['<node_internals>/**'],
-            stopOnEntry: false
-        };
-        
-        vscode.window.showInformationMessage('Starting test debugging session with project context...');
-        
-        // First, analyze the code to set up intelligent debugging
-        await vscode.commands.executeCommand('intelligent-debugger.startAnalysis');
-        
-        // Then start debugging
-        await vscode.debug.startDebugging(vscode.workspace.workspaceFolders?.[0], config);
-    });
     
     // Register custom prompt command
     let setCustomPromptCmd = vscode.commands.registerCommand('intelligent-debugger.setCustomPrompt', async () => {
@@ -604,7 +485,6 @@ export function activate(context: vscode.ExtensionContext) {
         setCustomPromptCmd,
         viewInsightsCmd,
         configureLLMCmd,
-        testDebugCmd,
         debuggerIntegration
     );
 }

@@ -1,17 +1,17 @@
 {
-    "name": "co-debugger.ai",
+    "name": "co-debugger-ai",
     "displayName": "CoDebugger.ai",
     "description": "AI-powered debugging assistant that identifies optimal debugging points and provides intelligent insights",
     "version": "0.1.0",
     "license": "MIT",
-    "publisher": "YashwanthNandam",
+    "publisher": "NandamYashwanth",
     "icon": "resources/debugger-icon.png",
     "repository": {
         "type": "git",
         "url": "https://github.com/yashwanthnandam/codebugger-ai"
     },
     "engines": {
-        "vscode": "^1.60.0"
+        "vscode": "^1.100.0"
     },
     "categories": [
         "Debuggers",
@@ -100,7 +100,7 @@
                 {
                     "id": "intelligent-debugger",
                     "title": "AI Debugger",
-                    "icon": "resources/debugger-icon.svg"
+                    "icon": "resources/debugger-icon.png"
                 }
             ]
         },
