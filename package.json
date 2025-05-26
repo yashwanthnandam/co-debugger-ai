@@ -2,7 +2,7 @@
     "name": "co-debugger-ai",
     "displayName": "CoDebugger.ai",
     "description": "AI-powered debugging assistant that identifies optimal debugging points and provides intelligent insights",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "license": "MIT",
     "publisher": "NandamYashwanth",
     "icon": "resources/codebugai.png",
@@ -36,61 +36,61 @@
     "contributes": {
         "commands": [
             {
-                "command": "intelligent-debugger.startAnalysis",
-                "title": "Start Intelligent Code Analysis"
+                "command": "codebugger.analyzeFile",
+                "title": "Analyze Current File",
+                "category": "CoDebugger",
+                "icon": "$(search)"
             },
             {
-                "command": "intelligent-debugger.setCustomPrompt",
-                "title": "Set Custom Debug Prompt"
+                "command": "codebugger.analyzeProject",
+                "title": "Analyze Entire Project",
+                "category": "CoDebugger", 
+                "icon": "$(search-view-icon)"
             },
             {
-                "command": "intelligent-debugger.viewInsights",
-                "title": "View Debug Insights"
+                "command": "codebugger.startDebugging",
+                "title": "Start AI-Powered Debugging",
+                "category": "CoDebugger",
+                "icon": "$(debug-start)"
             },
             {
-                "command": "intelligent-debugger.configureLLM",
-                "title": "Configure LLM Settings"
-            },
-            {
-                "command": "intelligent-debugger.testDebug",
-                "title": "Test Debugging Functionality"
-            },
-            {
-                "command": "intelligent-debugger.startIntelligentDebug",
-                "title": "Start Intelligent Debugging",
-                "category": "Intelligent Debugger",
-                "icon": "$(debug)"
-            },
-            {
-                "command": "intelligent-debugger.askAboutSelectedVariable",
-                "title": "Ask About Selected Variable",
-                "category": "Intelligent Debugger"
-            },
-            {
-                "command": "intelligent-debugger.promptVariable",
-                "title": "Ask About Any Variable",
-                "category": "Intelligent Debugger",
+                "command": "codebugger.askVariable",
+                "title": "Ask About Variable",
+                "category": "CoDebugger",
                 "icon": "$(question)"
             },
             {
-                "command": "intelligent-debugger.analyzeWorkspace",
-                "title": "Analyze Entire Project",
-                "category": "Intelligent Debugger",
-                "icon": "$(search)"
+                "command": "codebugger.askSelectedVariable",
+                "title": "Ask About Selected Variable",
+                "category": "CoDebugger",
+                "icon": "$(selection)"
+            },
+            {
+                "command": "codebugger.configure",
+                "title": "Configure AI Settings",
+                "category": "CoDebugger",
+                "icon": "$(settings-gear)"
             }
         ],
         "menus": {
             "editor/context": [
                 {
-                    "command": "intelligent-debugger.askAboutSelectedVariable",
+                    "command": "codebugger.askSelectedVariable",
                     "when": "editorHasSelection && debugState == 'stopped'",
                     "group": "navigation"
                 }
             ],
             "debug/toolBar": [
                 {
-                    "command": "intelligent-debugger.promptVariable",
+                    "command": "codebugger.askVariable",
                     "when": "debugState == 'stopped'",
+                    "group": "navigation"
+                }
+            ],
+            "view/title": [
+                {
+                    "command": "codebugger.analyzeFile",
+                    "when": "view == debugger.breakpoints || view == codebugger.breakpoints",
                     "group": "navigation"
                 }
             ]
@@ -99,7 +99,14 @@
             "panel": [
                 {
                     "id": "intelligent-debugger",
-                    "title": "AI Debugger",
+                    "title": "CoDebugger.ai",
+                    "icon": "resources/codebugai.png"
+                }
+            ],
+            "activitybar": [
+                {
+                    "id": "codebugger-sidebar",
+                    "title": "CoDebugger.ai",
                     "icon": "resources/codebugai.png"
                 }
             ]
@@ -107,11 +114,11 @@
         "views": {
             "intelligent-debugger": [
                 {
-                    "id": "debugBreakpoints",
+                    "id": "debugger.breakpoints",
                     "name": "Intelligent Breakpoints"
                 },
                 {
-                    "id": "debugInsights",
+                    "id": "debugger.insights",
                     "name": "Debug Insights"
                 },
                 {
@@ -122,10 +129,25 @@
                     "id": "llmSuggestions",
                     "name": "Fix Suggestions"
                 }
+            ],
+            "codebugger-sidebar": [
+                {
+                    "id": "codebugger.welcomeView",
+                    "name": "Getting Started",
+                    "type": "webview"
+                },
+                {
+                    "id": "codebugger.breakpoints",
+                    "name": "Breakpoints"
+                },
+                {
+                    "id": "codebugger.insights", 
+                    "name": "Insights"
+                }
             ]
         },
         "configuration": {
-            "title": "Intelligent Debugger",
+            "title": "CoDebugger",
             "properties": {
                 "intelligentDebugger.llmProvider": {
                     "type": "string",
@@ -179,13 +201,13 @@
         }
     },
     "scripts": {
-    "vscode:prepublish": "webpack --mode production",
-    "webpack": "webpack --mode development",
-    "webpack-dev": "webpack --mode development --watch",
-    "compile": "webpack --mode development",
-    "watch": "webpack --mode development --watch",
-    "pretest": "webpack --mode development",
-    "test": "node ./out/test/runTest.js"
+        "vscode:prepublish": "webpack --mode production",
+        "webpack": "webpack --mode development",
+        "webpack-dev": "webpack --mode development --watch",
+        "compile": "webpack --mode development",
+        "watch": "webpack --mode development --watch",
+        "pretest": "webpack --mode development",
+        "test": "node ./out/test/runTest.js"
     },
     "devDependencies": {
         "@babel/parser": "^7.27.2",

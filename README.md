@@ -1,15 +1,16 @@
 # 🧠 CoDebugger.ai
-AI-powered debugging assistant for VS Code...
 
-**AI-powered debugging assistant for VS Code** that identifies optimal debugging points, analyzes code execution, and provides intelligent insights to help you solve issues faster.
+**AI-powered debugging assistant for VS Code** that identifies optimal debugging points, recursively analyzes variables, and provides intelligent insights to help you solve issues faster.
 
 ---
 
 ## ✨ Features
 
 - **Smart Breakpoint Placement**: Automatically sets breakpoints at key locations based on your debugging goal  
+- **Deep Variable Analysis**: Recursively explores nested objects and identifies critical patterns  
+- **Intelligent Debugging Questions**: Auto-generates relevant questions based on variable state  
 - **Runtime Insight Analysis**: Provides AI-generated insights during debugging sessions  
-- **Variable Analysis**: Explains variable behavior and detects anomalies in real-time  
+- **Categorized Variable Insights**: Organizes variables by importance and diagnostic value  
 - **Root Cause Detection**: Intelligently identifies potential causes of bugs  
 - **Fix Suggestions**: Offers potential solutions to identified issues  
 - **Interactive Debugging**: Ask questions about variables during active debugging  
@@ -45,7 +46,7 @@ You can configure AI access in one of three ways:
 
 Create or edit the file: `src/config.ts`
 
-```ts
+```
 /**
  * Configuration file for API keys
  * DO NOT COMMIT THIS FILE TO VERSION CONTROL
@@ -55,14 +56,23 @@ export const API_KEYS = {
     ANTHROPIC: '', // Your Anthropic key
     GOOGLE: '',    // Your Google key
 };
+```
 
-✅ **Make sure `src/config.ts` is listed in `.gitignore`.**
+# 🧠 CoDebugger.ai
+
+**AI-powered debugging assistant for VS Code** that identifies optimal debugging points, recursively analyzes variables, and provides intelligent insights to help you solve issues faster.
 
 ---
 
-## Option 3: VS Code Settings
+## ✅ Configuration Note
 
-1. Open **Settings** (Ctrl+, / Cmd+,)
+Make sure `src/config.ts` is listed in `.gitignore`.
+
+---
+
+## ⚙️ Option 3: VS Code Settings
+
+1. Open **Settings** (`Ctrl+,` / `Cmd+,`)
 2. Search for **Intelligent Debugger**
 3. Enter your **AI provider** and **API key**
 
@@ -70,14 +80,15 @@ export const API_KEYS = {
 
 ## 🔧 Available Settings
 
-| Setting           | Description                             | Default                   |
-|-------------------|-----------------------------------------|---------------------------|
-| `llmProvider`     | Select AI provider                      | `openai`                  |
-| `llmModel`        | AI model to use                         | `gpt-4`                   |
-| `temperature`     | Creativity of AI responses (0.0–1.0)    | `0.7`                     |
-| `maxTokens`       | Max token count in AI responses         | `2048`                    |
-| `maxBreakpoints`  | Max intelligent breakpoints             | `10`                      |
-| `localLLMEndpoint`| Local LLM server endpoint if applicable | `http://localhost:8080/v1`|
+| Setting             | Description                              | Default                      |
+|---------------------|------------------------------------------|------------------------------|
+| `llmProvider`       | Select AI provider                       | `openai`                     |
+| `llmModel`          | AI model to use                          | `gpt-4`                      |
+| `temperature`       | Creativity of AI responses (0.0–1.0)     | `0.7`                        |
+| `maxTokens`         | Max token count in AI responses          | `2048`                       |
+| `maxBreakpoints`    | Max intelligent breakpoints              | `10`                         |
+| `recursiveMaxDepth` | Max depth for recursive variable analysis| `3`                          |
+| `localLLMEndpoint`  | Local LLM server endpoint (if applicable)| `http://localhost:8080/v1`  |
 
 ---
 
@@ -101,6 +112,16 @@ Then:
 - Start debugging  
 - View insights in the **Debug Insights** panel
 
+
+### 🔎 Deep Variable Analysis
+
+When you hit a breakpoint, CoDebugger.ai will:
+
+- Recursively analyze nested objects and arrays  
+- Categorize insights by type (Error Conditions, User Data, State Values, etc.)  
+- Generate debugging questions based on variable patterns  
+- Highlight anomalies in deeply nested properties  
+
 ---
 
 ### 💬 Ask About Variables
@@ -108,13 +129,15 @@ Then:
 While paused at a breakpoint:
 
 - Right-click a variable → **Ask About Selected Variable**  
-- OR click **Ask About Any Variable** in the debug toolbar
+- OR click **Ask About Any Variable** in the debug toolbar  
+- OR click on one of the auto-generated debugging questions  
 
-The AI will give you insights into the variable’s:
+The AI will provide insights on:
 
 - Current value  
 - Purpose  
 - Behavior  
+- Relationships with other variables  
 
 ---
 
@@ -122,32 +145,35 @@ The AI will give you insights into the variable’s:
 
 The **Debug Insights Panel** shows:
 
-- **Key Variables**: Variables affecting control flow  
+- **High-Impact Variables**: Most diagnostic variables at breakpoint  
+- **Categorized Insights**: Organized by type (Errors, User Data, State, Configuration)  
+- **Debugging Questions**: AI-generated questions relevant to your code  
 - **Execution Context**: Current call stack and execution path  
-- **Potential Issues**: Detected anomalies or bugs  
-- **Fix Suggestions**: AI-generated solutions  
+- **Nested Property Analysis**: Deep insights from complex objects  
 
 ---
 
 ### 🎯 Focused Debugging
 
-1. Run **Start Intelligent Debug**
-2. Enter your debugging focus (e.g., `"user validation"`)
-3. The AI will target breakpoints relevant to that area
+1. Run **Start Intelligent Debug**  
+2. Enter your debugging focus (e.g., `"user validation"`)  
+3. The AI will target breakpoints relevant to that area  
+4. The Debug Insights panel will highlight variables and patterns related to your focus  
 
 ---
 
 ## ⌨️ Key Commands
 
-| Command                      | Description                            |
-|-----------------------------|----------------------------------------|
-| Configure AI Settings       | Set up AI provider                     |
-| Start Intelligent Debug     | Begin a focused debugging session      |
-| View Debug Insights         | Open the insights panel                |
-| Ask About Selected Variable | Ask AI about selected variable         |
-| Set Custom Debug Prompt     | Set a prompt at the current line       |
-| Start Intelligent Analysis  | Analyze and set intelligent breakpoints|
-| Test Debugging Session      | Run a test debugging flow              |
+| Command                      | Description                              |
+|-----------------------------|------------------------------------------|
+| Configure AI Settings       | Set up AI provider                       |
+| Start Intelligent Debug     | Begin a focused debugging session        |
+| View Debug Insights         | Open the insights panel                  |
+| Ask About Selected Variable | Ask AI about selected variable           |
+| Ask About Variable Pattern  | Ask about a pattern in nested data       |
+| Set Custom Debug Prompt     | Set a prompt at the current line         |
+| Start Intelligent Analysis  | Analyze and set intelligent breakpoints  |
+| Test Debugging Session      | Run a test debugging flow                |
 
 ---
 
@@ -155,12 +181,13 @@ The **Debug Insights Panel** shows:
 
 This extension uses advanced techniques:
 
-- **Static Code Analysis**: Builds flow graphs
-- **Runtime Data Collection**: Tracks live variable values
-- **AI-Powered Analysis**: Uses LLMs for deep code understanding
-- **Anomaly Detection**: Identifies unusual logic or values
-- **Causal Analysis**: Traces potential causes of bugs
-- **Information Gain Optimization**: Places breakpoints strategically
+- **Static Code Analysis**: Builds flow graphs  
+- **Recursive Variable Analysis**: Traverses complex objects and arrays  
+- **Pattern Recognition**: Identifies important variable relationships  
+- **Anomaly Detection**: Detects unusual logic or values  
+- **Causal Analysis**: Traces potential causes of bugs  
+- **Information Gain Optimization**: Places breakpoints strategically  
+- **Question Generation**: Creates relevant debugging questions based on data patterns  
 
 ---
 
@@ -176,8 +203,9 @@ This extension uses advanced techniques:
 ### 🐢 Performance Tips
 
 - Use faster models like `gpt-3.5-turbo`  
-- Limit the number of breakpoints  
+- Limit recursive analysis depth (in settings)  
 - Focus debugging on specific files or functions  
+- Filter variable categories in the UI for faster rendering  
 
 ---
 
@@ -196,3 +224,7 @@ Licensed under the [MIT License](./LICENSE).
 ## 👨‍💻 Credits
 
 Developed by **Yashwanth Nandam**
+
+---
+
+*Last updated: 2025-05-26*

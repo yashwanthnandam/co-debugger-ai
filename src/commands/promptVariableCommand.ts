@@ -241,7 +241,121 @@ export class PromptVariableCommand {
             throw error;
         }
     }
+
+    /**
+ * Public method to analyze a variable by name
+ */
+public async askAboutVariable(variableName: string): Promise<void> {
+    // Check if we're in an active debug session
+    const debugSession = vscode.debug.activeDebugSession;
+    if (!debugSession) {
+        vscode.window.showErrorMessage('No active debug session');
+        return;
+    }
     
+    // Get the prompt from the user
+    const prompt = await vscode.window.showInputBox({
+        prompt: `What would you like to know about '${variableName}'?`,
+        placeHolder: "E.g., Why is it null? How did it get this value? What's causing it to change?"
+    });
+    
+    if (!prompt) return;
+    
+    // Show a loading indicator
+    await this.showAnswer(variableName, prompt, "Analyzing...");
+    
+    try {
+        // Get the currently active stack frame
+        const stackFrames = await this.getStackFrames(debugSession);
+        if (!stackFrames || stackFrames.length === 0) {
+            vscode.window.showErrorMessage('No stack frames available');
+            return;
+        }
+        
+        const topFrame = stackFrames[0];
+        
+        // Gather contextual information
+        const variables = await this.getVariables(debugSession, topFrame);
+        
+        // Get code context
+        const editor = await this.openCurrentSourceLocation(topFrame);
+        const codeContext = editor ? 
+            this.getCodeContext(editor.document.getText(), editor.selection.start.line) : 
+            "No code context available";
+        
+        // Get variable history from data collector
+        const variableHistory = this.getVariableHistory(variableName);
+        
+        // Prepare the answer using LLM
+        const answer = await this.generateVariableInsight(
+            variableName,
+            variables[variableName],
+            prompt,
+            codeContext,
+            variables,
+            variableHistory
+        );
+        
+        // Show the answer
+        await this.showAnswer(variableName, prompt, answer);
+        
+    } catch (error) {
+        console.error("Error analyzing variable:", error);
+        vscode.window.showErrorMessage(`Error analyzing variable: ${error.message}`);
+    }
+}
+    
+/**
+ * Open the debug source location and return the editor
+ */
+private async openCurrentSourceLocation(stackFrame: any): Promise<vscode.TextEditor | undefined> {
+    if (!stackFrame.source || !stackFrame.source.path) {
+        return undefined;
+    }
+    
+    try {
+        // Check if the file is already open in an editor
+        for (const editor of vscode.window.visibleTextEditors) {
+            if (editor.document.uri.fsPath === stackFrame.source.path) {
+                // File is already open, just focus this editor
+                await vscode.window.showTextDocument(editor.document, {
+                    viewColumn: editor.viewColumn,
+                    preserveFocus: false
+                });
+                
+                // Move cursor to the current line
+                const position = new vscode.Position(stackFrame.line - 1, stackFrame.column);
+                editor.selection = new vscode.Selection(position, position);
+                editor.revealRange(
+                    new vscode.Range(position, position),
+                    vscode.TextEditorRevealType.InCenter
+                );
+                
+                return editor;
+            }
+        }
+        
+        // File is not open yet, open it
+        const document = await vscode.workspace.openTextDocument(stackFrame.source.path);
+        const editor = await vscode.window.showTextDocument(document, {
+            viewColumn: vscode.ViewColumn.One,
+            preserveFocus: false
+        });
+        
+        // Move cursor to the current line
+        const position = new vscode.Position(stackFrame.line - 1, stackFrame.column);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(
+            new vscode.Range(position, position),
+            vscode.TextEditorRevealType.InCenter
+        );
+        
+        return editor;
+    } catch (error) {
+        console.error("Error opening source location:", error);
+        return undefined;
+    }
+}
     /**
      * Get all variables in the current stack frame
      */
@@ -504,32 +618,7 @@ Use Markdown formatting in your response to improve readability.
         // you might want to do a deep comparison for objects
         return latest !== previous;
     }
-    /**
-     * Open the debug source location and return the editor
-     */
-    private async openCurrentSourceLocation(stackFrame: any): Promise<vscode.TextEditor | undefined> {
-        if (!stackFrame.source || !stackFrame.source.path) {
-            return undefined;
-        }
-        
-        try {
-            const document = await vscode.workspace.openTextDocument(stackFrame.source.path);
-            const editor = await vscode.window.showTextDocument(document);
-            
-            // Move cursor to the current line
-            const position = new vscode.Position(stackFrame.line - 1, stackFrame.column);
-            editor.selection = new vscode.Selection(position, position);
-            editor.revealRange(
-                new vscode.Range(position, position),
-                vscode.TextEditorRevealType.InCenter
-            );
-            
-            return editor;
-        } catch (error) {
-            console.error("Error opening source location:", error);
-            return undefined;
-        }
-    }
+
     
     /**
      * Show the answer in a webview panel

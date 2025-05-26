@@ -263,4 +263,18 @@ export class BreakpointManager {
         // Also clear VS Code breakpoints
         vscode.debug.removeBreakpoints(vscode.debug.breakpoints);
     }
+
+    /**
+     * Get all breakpoints for a specific URI
+     * @param uri The URI to filter breakpoints for
+     * @returns Array of breakpoints for the specified URI
+     */
+    public getBreakpointsForUri(uri: vscode.Uri): IntelligentBreakpoint[] {
+        if (!uri) return [];
+        
+        // Filter breakpoints to only those matching the provided URI
+        return this.rankedBreakpoints.filter(bp => 
+            bp.uri.fsPath === uri.fsPath
+        );
+    }
 }

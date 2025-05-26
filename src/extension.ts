@@ -6,9 +6,8 @@ import { CodeAnalyzer } from './codeAnalyzer';
 import { IntelligentDebugCommand } from './commands/intelligentDebugCommand';
 import { BreakpointManager } from './breakpointManager';
 import { DataCollector } from './dataCollector';
-import { DebuggerIntegration } from './debuggerIntegration';
+import { DebuggerIntegration } from './debuggerIntegration/debuggerIntegration';
 import { ConversationalPrompts } from './conversationalPrompts';
-import { DebugInsightsPanel } from './views/debugInsightsPanel';
 import { LLMService } from './llmService';
 import { CausalAnalysis } from './causalAnalysis';
 import { InformationGainAnalyzer } from './informationGain';
@@ -16,6 +15,132 @@ import { BreakpointsProvider, RootCauseProvider, FixSuggestionsProvider, DebugIn
 import { PromptVariableCommand } from './commands/promptVariableCommand';
 import { BreakpointRanker } from './algorithms/breakPointRanker';
 import { ConfigurationWizard } from './configurationWizard';
+
+// Welcome view provider for getting started
+class WelcomeViewProvider implements vscode.WebviewViewProvider {
+    public static readonly viewType = 'codebugger.welcomeView';
+    
+    constructor(private readonly extensionUri: vscode.Uri) {}
+    
+    public resolveWebviewView(
+        webviewView: vscode.WebviewView,
+        context: vscode.WebviewViewResolveContext,
+        _token: vscode.CancellationToken
+    ) {
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this.extensionUri]
+        };
+        
+        webviewView.webview.html = this.getHtmlContent();
+        
+        webviewView.webview.onDidReceiveMessage(async (data) => {
+            if (data.command) {
+                await vscode.commands.executeCommand(data.command);
+            }
+        });
+    }
+    
+    private getHtmlContent() {
+        const currentDate = "2025-05-26 03:22:00";
+        
+        return `<!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { padding: 10px; font-family: var(--vscode-font-family); }
+                .title { font-size: 1.2em; margin-bottom: 10px; }
+                .step { margin-bottom: 20px; }
+                .step-number {
+                    display: inline-block;
+                    width: 24px;
+                    height: 24px;
+                    line-height: 24px;
+                    text-align: center;
+                    background-color: var(--vscode-button-background);
+                    color: var(--vscode-button-foreground);
+                    border-radius: 12px;
+                    margin-right: 8px;
+                }
+                .step-button {
+                    background-color: var(--vscode-button-background);
+                    color: var(--vscode-button-foreground);
+                    border: none;
+                    padding: 6px 14px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    margin-top: 8px;
+                    margin-right: 8px;
+                }
+                .step-desc {
+                    margin: 8px 0;
+                    opacity: 0.8;
+                }
+                .footer {
+                    font-size: 0.8em;
+                    opacity: 0.6;
+                    margin-top: 20px;
+                    border-top: 1px solid var(--vscode-panel-border);
+                    padding-top: 10px;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="title">🐞 CoDebugger.ai Workflow</div>
+            
+            <div class="step">
+                <span class="step-number">1</span>
+                <b>Configure AI</b>
+                <div class="step-desc">Set up your LLM provider and API key</div>
+                <button class="step-button" onclick="runCommand('codebugger.configure')">
+                    Configure AI Settings
+                </button>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">2</span>
+                <b>Analyze Your Code</b>
+                <div class="step-desc">Analyze your code to set intelligent breakpoints</div>
+                <button class="step-button" onclick="runCommand('codebugger.analyzeFile')">
+                    Analyze Current File
+                </button>
+                <button class="step-button" onclick="runCommand('codebugger.analyzeProject')">
+                    Analyze Project
+                </button>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">3</span>
+                <b>Start Debugging</b>
+                <div class="step-desc">Run your code with AI-powered debugging</div>
+                <button class="step-button" onclick="runCommand('codebugger.startDebugging')">
+                    Start Debugging
+                </button>
+            </div>
+            
+            <div class="step">
+                <span class="step-number">4</span>
+                <b>Ask Questions</b>
+                <div class="step-desc">Ask about variables during debugging</div>
+                <button class="step-button" onclick="runCommand('codebugger.askVariable')">
+                    Ask About Variable
+                </button>
+            </div>
+            
+            <div class="footer">
+                CoDebugger.ai v0.1.3 | Updated: ${currentDate}
+            </div>
+            
+            <script>
+                const vscode = acquireVsCodeApi();
+                function runCommand(command) {
+                    vscode.postMessage({ command });
+                }
+            </script>
+        </body>
+        </html>`;
+    }
+}
 
 // Create a single instance of the LLM service to be shared
 let llmService: LLMService;
@@ -32,7 +157,9 @@ let analyzedFileCount = 0;
 let totalFilesToAnalyze = 0;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('intelligent-debugger extension is now active');
+    console.log('CoDebugger.ai extension is now active');
+console.log(`Activation time: 2025-05-26 03:27:04`);
+console.log(`User: yashwanthnandamworking version`);
 
     // Initialize LLM service
     llmService = new LLMService();
@@ -50,7 +177,8 @@ export function activate(context: vscode.ExtensionContext) {
         breakpointManager,
         dataCollector,
         debugInsightsProvider,
-        breakpointRanker
+        breakpointRanker,
+        llmService,
     );
 
     const promptVariableCommand = new PromptVariableCommand(
@@ -60,6 +188,7 @@ export function activate(context: vscode.ExtensionContext) {
         codeAnalyzer,
         intelligentDebugCommand,
     );
+    
     // Initialize and register tree data providers
     breakpointsProvider = new BreakpointsProvider();
     rootCauseProvider = new RootCauseProvider();
@@ -93,17 +222,22 @@ export function activate(context: vscode.ExtensionContext) {
     }]);
 
     // Register the tree data providers with VS Code
-    vscode.window.registerTreeDataProvider('debugBreakpoints', breakpointsProvider);
+    vscode.window.registerTreeDataProvider('debugger.breakpoints', breakpointsProvider);
+    vscode.window.registerTreeDataProvider('debugger.insights', debugInsightsProvider);
     vscode.window.registerTreeDataProvider('rootCauses', rootCauseProvider);
     vscode.window.registerTreeDataProvider('llmSuggestions', fixSuggestionsProvider);
-    vscode.window.registerTreeDataProvider('debugInsights', debugInsightsProvider);
+    
+    // Register sidebar views with the same providers but different IDs
+    vscode.window.registerTreeDataProvider('codebugger.breakpoints', breakpointsProvider);
+    vscode.window.registerTreeDataProvider('codebugger.insights', debugInsightsProvider);
     
     const debuggerIntegration = new DebuggerIntegration(
         breakpointManager, 
         dataCollector,
         causalAnalyzer,
         infoGainAnalyzer,
-        llmService
+        llmService,
+        intelligentDebugCommand, // Pass promptVariableCommand
     );
     
     // Pass tree data providers to debugger integration for updating
@@ -116,40 +250,142 @@ export function activate(context: vscode.ExtensionContext) {
     
     const promptManager = new ConversationalPrompts(context, llmService);
 
-    // Register LLM configuration command with the wizard
-    let configureLLMCmd = vscode.commands.registerCommand('intelligent-debugger.configureLLM', async () => {
-        try {
-            const config = await ConfigurationWizard.collectParameters();
-            if (config) {
-                // Update the LLM service with new configuration
-                await llmService.updateConfiguration(config);
-                vscode.window.showInformationMessage('AI configuration updated successfully!');
-                
-                // Try to show insights panel with command that exists
-                try {
-                    await vscode.commands.executeCommand('intelligent-debugger.viewInsights');
-                } catch (e) {
-                    // Silently ignore if command not found
-                }
-                
-                // Also focus debug panel if it exists
-                try {
-                    await vscode.commands.executeCommand('workbench.view.debug');
-                } catch (e) {
-                    // Silently ignore if command not found
-                }
-                
-                // Update status bar
-                updateLlmStatus();
-            }
-        } catch (error) {
-            vscode.window.showErrorMessage(`Configuration error: ${error.message}`);
+    // Register Welcome View
+    const welcomeViewProvider = new WelcomeViewProvider(context.extensionUri);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            WelcomeViewProvider.viewType,
+            welcomeViewProvider
+        )
+    );
+
+    // Add quick actions menu to status bar
+    const quickActionsButton = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Left,
+        100
+    );
+    quickActionsButton.text = "$(debug-console) CoDebugger";
+    quickActionsButton.tooltip = "CoDebugger.ai Quick Actions";
+    quickActionsButton.command = "codebugger.showQuickActions";
+    context.subscriptions.push(quickActionsButton);
+    quickActionsButton.show();
+
+    // SIMPLIFIED COMMANDS REGISTRATION
+
+    // 1. Analyze Current File command
+    let analyzeFileCmd = vscode.commands.registerCommand('codebugger.analyzeFile', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showErrorMessage('No active editor found');
+            return;
         }
+
+        vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: "Analyzing code structure...",
+            cancellable: true
+        }, async (progress) => {
+            progress.report({ increment: 0 });
+            
+            try {
+                // Step 1: Analyze the code and build flow graph
+                const document = editor.document;
+                progress.report({ increment: 10, message: "Analyzing code with AI..." });
+                
+                // Check if this file has already been analyzed
+                const alreadyAnalyzed = codeAnalyzer.isFileAnalyzed(document.fileName);
+                
+                // Analyze current file
+                await codeAnalyzer.analyzeCode(document.getText(), document.fileName);
+                progress.report({ increment: 20, message: "Building code flow graph" });
+                
+                // Step 2: If file was not previously analyzed, try to find related files
+                if (!alreadyAnalyzed && vscode.workspace.workspaceFolders) {
+                    progress.report({ 
+                        increment: 5, 
+                        message: "Discovering related files..." 
+                    });
+                    
+                    // Get dependencies from code analyzer
+                    const dependencies = codeAnalyzer.getFileDependencies(document.fileName) || [];
+                    
+                    // Analyze a small batch of related files for context
+                    let relatedFilesAnalyzed = 0;
+                    for (const depFile of dependencies.slice(0, 3)) {
+                        try {
+                            if (!codeAnalyzer.isFileAnalyzed(depFile)) {
+                                const content = await fs.promises.readFile(depFile, 'utf8');
+                                await codeAnalyzer.analyzeCode(content, depFile);
+                                relatedFilesAnalyzed++;
+                                
+                                progress.report({ 
+                                    message: `Analyzing related file ${relatedFilesAnalyzed}/${Math.min(dependencies.length, 3)}` 
+                                });
+                            }
+                        } catch (err) {
+                            console.log(`Could not analyze dependency: ${depFile}`, err);
+                            // Continue with other files if one fails
+                        }
+                    }
+                    
+                    if (relatedFilesAnalyzed > 0) {
+                        progress.report({ 
+                            increment: 5, 
+                            message: `Analyzed ${relatedFilesAnalyzed} related files for context` 
+                        });
+                    }
+                }
+                
+                // Step 3: Calculate heuristic scores for potential breakpoints
+                progress.report({ increment: 15, message: "Scoring potential debug points" });
+                await breakpointManager.rankBreakpoints();
+                
+                // Step 4: Set intelligent breakpoints
+                const topBreakpoints = await breakpointManager.getTopBreakpoints();
+                progress.report({ increment: 15, message: "Setting intelligent breakpoints" });
+                await debuggerIntegration.setBreakpoints(topBreakpoints, document.uri);
+                
+                // Step 5: Share code snippets with data collector for context
+                progress.report({ increment: 15, message: "Preparing debugging context" });
+                for (const [nodeId, node] of codeAnalyzer.getNodes().entries()) {
+                    const snippet = codeAnalyzer.getCodeSnippet(nodeId);
+                    if (snippet) {
+                        dataCollector.setCodeSnippet(nodeId, snippet);
+                    }
+                }
+                
+                // Update tree views with breakpoints data
+                if (topBreakpoints.length > 0) {
+                    breakpointsProvider.refresh(topBreakpoints.map(bp => ({
+                        location: `${bp.uri.fsPath.split('/').pop()}:${bp.line + 1}`,
+                        reason: bp.reason || 'Intelligent analysis',
+                        score: bp.score
+                    })));
+                }
+                
+                // Step 6: Update project context for LLM
+                progress.report({ increment: 10, message: "Updating project context for AI" });
+                await debuggerIntegration.provideProjectContext(document.fileName, llmService);
+                
+                progress.report({ increment: 10, message: "Ready for intelligent debugging" });
+                
+                vscode.window.showInformationMessage(
+                    `Analysis complete. ${topBreakpoints.length} intelligent breakpoints set.`,
+                    'Start Debugging'
+                ).then(selection => {
+                    if (selection === 'Start Debugging') {
+                        vscode.commands.executeCommand('codebugger.startDebugging');
+                    }
+                });
+            } catch (error) {
+                console.error("Error analyzing code:", error);
+                vscode.window.showErrorMessage(`Analysis failed: ${error.message}`);
+            }
+        });
     });
 
-    
-    // Register workspace analysis command (new command for project-wide analysis)
-    let analyzeWorkspaceCmd = vscode.commands.registerCommand('intelligent-debugger.analyzeWorkspace', async () => {
+    // 2. Analyze Project command
+    let analyzeProjectCmd = vscode.commands.registerCommand('codebugger.analyzeProject', async () => {
         if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
             vscode.window.showErrorMessage('No workspace folder is open');
             return;
@@ -254,11 +490,11 @@ export function activate(context: vscode.ExtensionContext) {
                 
                 // Step 5: Show analysis results
                 vscode.window.showInformationMessage(
-                    `Workspace analysis complete. Analyzed ${analyzedFileCount} files.`,
-                    'View Details'
+                    `Project analysis complete. Analyzed ${analyzedFileCount} files.`,
+                    'Start Debugging'
                 ).then(selection => {
-                    if (selection === 'View Details') {
-                        DebugInsightsPanel.createOrShow(context.extensionUri);
+                    if (selection === 'Start Debugging') {
+                        vscode.commands.executeCommand('codebugger.startDebugging');
                     }
                 });
                 
@@ -275,170 +511,158 @@ export function activate(context: vscode.ExtensionContext) {
                 
             } catch (error) {
                 console.error("Error analyzing workspace:", error);
-                vscode.window.showErrorMessage(`Workspace analysis failed: ${error.message}`);
+                vscode.window.showErrorMessage(`Project analysis failed: ${error.message}`);
             }
         });
     });
-    
-    // Register start analysis command (enhanced with project context)
-    let startAnalysisCmd = vscode.commands.registerCommand('intelligent-debugger.startAnalysis', async () => {
+
+    // 3. Start Debugging command
+    let startDebuggingCmd = vscode.commands.registerCommand('codebugger.startDebugging', async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showErrorMessage('No active editor found');
             return;
         }
 
-        vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title: "Analyzing code structure...",
-            cancellable: true
-        }, async (progress) => {
-            progress.report({ increment: 0 });
-            
-            try {
-                // Step 1: Analyze the code and build flow graph
-                const document = editor.document;
-                progress.report({ increment: 10, message: "Analyzing code with AI..." });
+        try {
+            // Check if breakpoints are set or need to be set
+            const breakpoints = breakpointManager.getBreakpointsForUri(editor.document.uri);
+            if (!breakpoints || breakpoints.length === 0) {
+                const shouldAnalyze = await vscode.window.showInformationMessage(
+                    'No intelligent breakpoints set for this file. Analyze first?',
+                    'Yes, Analyze File',
+                    'No, Just Debug'
+                );
                 
-                // Check if this file has already been analyzed
-                const alreadyAnalyzed = codeAnalyzer.isFileAnalyzed(document.fileName);
-                
-                // Analyze current file
-                await codeAnalyzer.analyzeCode(document.getText(), document.fileName);
-                progress.report({ increment: 20, message: "Building code flow graph" });
-                
-                // Step 2: If file was not previously analyzed, try to find related files
-                if (!alreadyAnalyzed && vscode.workspace.workspaceFolders) {
-                    progress.report({ 
-                        increment: 5, 
-                        message: "Discovering related files..." 
-                    });
-                    
-                    // Get dependencies from code analyzer
-                    const dependencies = codeAnalyzer.getFileDependencies(document.fileName) || [];
-                    
-                    // Analyze a small batch of related files for context
-                    let relatedFilesAnalyzed = 0;
-                    for (const depFile of dependencies.slice(0, 3)) {
-                        try {
-                            if (!codeAnalyzer.isFileAnalyzed(depFile)) {
-                                const content = await fs.promises.readFile(depFile, 'utf8');
-                                await codeAnalyzer.analyzeCode(content, depFile);
-                                relatedFilesAnalyzed++;
-                                
-                                progress.report({ 
-                                    message: `Analyzing related file ${relatedFilesAnalyzed}/${Math.min(dependencies.length, 3)}` 
-                                });
-                            }
-                        } catch (err) {
-                            console.log(`Could not analyze dependency: ${depFile}`, err);
-                            // Continue with other files if one fails
-                        }
-                    }
-                    
-                    if (relatedFilesAnalyzed > 0) {
-                        progress.report({ 
-                            increment: 5, 
-                            message: `Analyzed ${relatedFilesAnalyzed} related files for context` 
-                        });
-                    }
+                if (shouldAnalyze === 'Yes, Analyze File') {
+                    await vscode.commands.executeCommand('codebugger.analyzeFile');
+                    return; // The debugging will be triggered after analysis
                 }
-                
-                // Step 3: Calculate heuristic scores for potential breakpoints
-                progress.report({ increment: 15, message: "Scoring potential debug points" });
-                await breakpointManager.rankBreakpoints();
-                
-                // Step 4: Set intelligent breakpoints
-                const topBreakpoints = await breakpointManager.getTopBreakpoints();
-                progress.report({ increment: 15, message: "Setting intelligent breakpoints" });
-                await debuggerIntegration.setBreakpoints(topBreakpoints, document.uri);
-                
-                // Step 5: Share code snippets with data collector for context
-                progress.report({ increment: 15, message: "Preparing debugging context" });
-                for (const [nodeId, node] of codeAnalyzer.getNodes().entries()) {
-                    const snippet = codeAnalyzer.getCodeSnippet(nodeId);
-                    if (snippet) {
-                        dataCollector.setCodeSnippet(nodeId, snippet);
-                    }
-                }
-                
-                // Update tree views with breakpoints data - ONLY REFRESH ONCE
-                if (topBreakpoints.length > 0) {
-                    breakpointsProvider.refresh(topBreakpoints.map(bp => ({
-                        location: `${bp.uri.fsPath.split('/').pop()}:${bp.line + 1}`,
-                        reason: bp.reason || 'Intelligent analysis',
-                        score: bp.score
-                    })));
-                }
-                
-                // Step 6: Update project context for LLM
-                progress.report({ increment: 10, message: "Updating project context for AI" });
-                await debuggerIntegration.provideProjectContext(document.fileName, llmService);
-                
-                progress.report({ increment: 10, message: "Ready for intelligent debugging" });
-                
-                vscode.window.showInformationMessage(
-                    `Analysis complete. ${topBreakpoints.length} intelligent breakpoints set.`,
-                    'View Details',
-                    'Analyze Entire Project'
-                ).then(selection => {
-                    if (selection === 'View Details') {
-                        DebugInsightsPanel.createOrShow(context.extensionUri);
-                    } else if (selection === 'Analyze Entire Project') {
-                        vscode.commands.executeCommand('intelligent-debugger.analyzeWorkspace');
-                    }
-                });
-            } catch (error) {
-                console.error("Error analyzing code:", error);
-                vscode.window.showErrorMessage(`Analysis failed: ${error.message}`);
             }
-        });
+
+            // Start the debugging session
+            vscode.commands.executeCommand('workbench.action.debug.start');
+            
+            // Show notification that AI debugging is active
+            vscode.window.showInformationMessage(
+                'CoDebugger.ai is now actively monitoring your debugging session'
+            );
+
+        } catch (error) {
+            console.error('Error starting debug session:', error);
+            vscode.window.showErrorMessage(`Failed to start debugging: ${error.message}`);
+        }
     });
-    
-    // Register custom prompt command
-    let setCustomPromptCmd = vscode.commands.registerCommand('intelligent-debugger.setCustomPrompt', async () => {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            vscode.window.showErrorMessage('No active editor found');
+
+    // 5. Ask Variable command
+    let askVariableCmd = vscode.commands.registerCommand('codebugger.askVariable', async () => {
+        if (!vscode.debug.activeDebugSession) {
+            vscode.window.showErrorMessage('No active debugging session');
             return;
         }
-
-        const lineNumber = editor.selection.active.line;
-        const prompt = await vscode.window.showInputBox({
-            prompt: `Enter a custom prompt for line ${lineNumber + 1}`,
-            placeHolder: 'E.g., Why is this variable value changing unexpectedly?'
+        
+        const variableName = await vscode.window.showInputBox({
+            prompt: 'Enter variable name to analyze',
+            placeHolder: 'e.g., counter, userInput, data'
         });
-
-        if (prompt) {
-            const expectedValue = await vscode.window.showInputBox({
-                prompt: 'Enter expected value or behavior (optional)',
-                placeHolder: 'E.g., Value should be positive or < 100'
-            });
-
-            await promptManager.setPrompt(editor.document.uri, lineNumber, prompt, expectedValue || '');
-            
-            // Show confirmation with enhanced details
-            const enhancedPrompt = await promptManager.getPrompt(editor.document.uri, lineNumber);
-            if (enhancedPrompt?.enhancedDetails) {
-                const message = 
-                    `Custom prompt set for line ${lineNumber + 1}\n\n` +
-                    `AI enhanced understanding:\n` +
-                    `- ${enhancedPrompt.enhancedDetails.enhancedPrompt}\n\n` +
-                    `Key variables to watch: ${enhancedPrompt.enhancedDetails.relevantVariables.join(', ')}`;
-                
-                vscode.window.showInformationMessage(message);
-            } else {
-                vscode.window.showInformationMessage(`Custom prompt set for line ${lineNumber + 1}`);
-            }
+        
+        if (!variableName) return;
+        
+        try {
+            await promptVariableCommand.askAboutVariable(variableName);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to analyze variable: ${error.message}`);
         }
     });
 
-    // Register view insights command
-    let viewInsightsCmd = vscode.commands.registerCommand('intelligent-debugger.viewInsights', () => {
-        // When explicitly requesting to view insights, always show the panel
-        const { DebugInsightsPanel } = require('./views/debugInsightsPanel');
-        DebugInsightsPanel.createOrShow(context.extensionUri, true);
+    // 6. Ask Selected Variable command
+    let askSelectedVariableCmd = vscode.commands.registerCommand('codebugger.askSelectedVariable', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || !vscode.debug.activeDebugSession) {
+            vscode.window.showErrorMessage('No active editor or debugging session');
+            return;
+        }
+        
+        const selection = editor.selection;
+        const selectedText = editor.document.getText(selection);
+        
+        if (!selectedText) {
+            vscode.window.showErrorMessage('No text selected');
+            return;
+        }
+        
+        try {
+            await promptVariableCommand.askAboutVariable(selectedText);
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to analyze variable: ${error.message}`);
+        }
     });
+
+    // 7. Configure AI Settings command
+    let configureCmd = vscode.commands.registerCommand('codebugger.configure', async () => {
+        try {
+            const config = await ConfigurationWizard.collectParameters();
+            if (config) {
+                // Update the LLM service with new configuration
+                await llmService.updateConfiguration(config);
+                vscode.window.showInformationMessage('AI configuration updated successfully!');
+                
+                // Update status bar
+                updateLlmStatus();
+                
+                // Guide user to next step
+                const nextStep = await vscode.window.showInformationMessage(
+                    'AI configuration complete! What would you like to do next?',
+                    'Analyze File',
+                    'Analyze Project'
+                );
+                
+                if (nextStep === 'Analyze File') {
+                    await vscode.commands.executeCommand('codebugger.analyzeFile');
+                } else if (nextStep === 'Analyze Project') {
+                    await vscode.commands.executeCommand('codebugger.analyzeProject');
+                }
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage(`Configuration error: ${error.message}`);
+        }
+    });
+
+    // 8. Quick Actions command
+    let quickActionsCmd = vscode.commands.registerCommand('codebugger.showQuickActions', async () => {
+        const actions = [
+            { label: "$(search) Analyze Current File", id: "analyzeFile" },
+            { label: "$(search-view-icon) Analyze Entire Project", id: "analyzeProject" },
+            { label: "$(debug-start) Start AI-Powered Debugging", id: "startDebugging" },
+            { label: "$(question) Ask About Variable", id: "askVariable" },
+            { label: "$(settings-gear) Configure AI Settings", id: "configure" }
+        ];
+        
+        const selected = await vscode.window.showQuickPick(actions, {
+            placeHolder: "Select a CoDebugger.ai action"
+        });
+        
+        if (selected) {
+            await vscode.commands.executeCommand(`codebugger.${selected.id}`);
+        }
+    });
+    
+    // Register backward compatibility aliases - SAFER APPROACH
+    try {
+        vscode.commands.registerCommand('intelligent-debugger.startAnalysis', () => 
+            vscode.commands.executeCommand('codebugger.analyzeFile'));
+        vscode.commands.registerCommand('intelligent-debugger.analyzeWorkspace', () => 
+            vscode.commands.executeCommand('codebugger.analyzeProject'));
+        vscode.commands.registerCommand('intelligent-debugger.promptVariable', () => 
+            vscode.commands.executeCommand('codebugger.askVariable'));
+        vscode.commands.registerCommand('intelligent-debugger.askAboutSelectedVariable', () => 
+            vscode.commands.executeCommand('codebugger.askSelectedVariable'));
+        vscode.commands.registerCommand('intelligent-debugger.configureLLM', () => 
+            vscode.commands.executeCommand('codebugger.configure'));
+    } catch (err) {
+        // Silently ignore registration errors for backward compatibility commands
+        console.log('Note: Some backward compatibility commands could not be registered');
+    }
 
     // Register debug session event handlers
     debuggerIntegration.registerEventHandlers();
@@ -450,7 +674,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
     llmStatusBarItem.text = "$(settings-gear) Configure AI";
     llmStatusBarItem.tooltip = "Configure AI settings for intelligent debugging";
-    llmStatusBarItem.command = "intelligent-debugger.configureLLM";
+    llmStatusBarItem.command = "codebugger.configure";
     context.subscriptions.push(llmStatusBarItem);
     llmStatusBarItem.show();
 
@@ -480,13 +704,34 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Add all disposables to context
     context.subscriptions.push(
-        startAnalysisCmd,
-        analyzeWorkspaceCmd,
-        setCustomPromptCmd,
-        viewInsightsCmd,
-        configureLLMCmd,
+        analyzeFileCmd,
+        analyzeProjectCmd,
+        startDebuggingCmd,
+        askVariableCmd,
+        askSelectedVariableCmd,
+        configureCmd,
+        quickActionsCmd,
         debuggerIntegration
     );
+
+    // Show a welcome message on first activation
+    const hasShownWelcome = context.globalState.get('codebugger.hasShownWelcome');
+    if (!hasShownWelcome) {
+        setTimeout(() => {
+            vscode.window.showInformationMessage(
+                'Welcome to CoDebugger.ai! Start by configuring your AI settings.',
+                'Configure Now', 
+                'Show Tutorial'
+            ).then(selection => {
+                if (selection === 'Configure Now') {
+                    vscode.commands.executeCommand('codebugger.configure');
+                } else if (selection === 'Show Tutorial') {
+                    vscode.commands.executeCommand('workbench.view.extension.codebugger-sidebar');
+                }
+            });
+            context.globalState.update('codebugger.hasShownWelcome', true);
+        }, 2000);
+    }
 }
 
 /**
